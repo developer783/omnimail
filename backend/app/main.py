@@ -5,7 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, google_oauth, emails, filters
+from app.routers.auth import router as auth_router
+from app.routers.google_oauth import router as google_oauth_router
+from app.routers.emails import router as emails_router
+from app.routers.filters import router as filters_router
 from app.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging format
@@ -52,10 +55,10 @@ app.add_middleware(
 )
 
 # Include Routers
-app.include_router(auth.router)
-app.include_router(google_oauth.router)
-app.include_router(emails.router)
-app.include_router(filters.router)
+app.include_router(auth_router)
+app.include_router(google_oauth_router)
+app.include_router(emails_router)
+app.include_router(filters_router)
 
 @app.get("/", tags=["Root"])
 def root():
