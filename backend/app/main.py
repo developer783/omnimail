@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, google_oauth, emails
+from app.routers import auth, google_oauth, emails, filters
 from app.scheduler import start_scheduler, stop_scheduler
 
 # Configure logging format
@@ -55,6 +55,16 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(google_oauth.router)
 app.include_router(emails.router)
+app.include_router(filters.router)
+
+@app.get("/", tags=["Root"])
+def root():
+    return {
+        "status": "online",
+        "message": "Omnimail FastAPI Backend Server is running successfully!",
+        "documentation": "/docs",
+        "health_check": "/health"
+    }
 
 @app.get("/health", tags=["Health"])
 def health_check():
