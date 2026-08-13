@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Inbox,
   Mail,
@@ -11,7 +11,9 @@ import {
   RefreshCw,
   X,
   Layers,
-  AlertTriangle
+  AlertTriangle,
+  Filter,
+  Tag
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -22,6 +24,9 @@ export default function Sidebar({
   activeFolder,
   onSelectFolder,
   folderCounts,
+  filters = [],
+  onAddFilter,
+  onDeleteFilter,
   onOpenCompose,
   onRequestDisconnect,
   onSync,
@@ -30,6 +35,10 @@ export default function Sidebar({
   currentUser,
   onRefreshAccounts
 }) {
+  const [showAddFilterForm, setShowAddFilterForm] = useState(false);
+  const [newKeyword, setNewKeyword] = useState('');
+  const [newField, setNewField] = useState('any');
+
   const handleAddAccount = async () => {
     try {
       const url = await api.getGoogleOAuthUrl();
@@ -47,6 +56,16 @@ export default function Sidebar({
         }
       }
     }
+  };
+
+  const handleCreateFilterSubmit = (e) => {
+    e.preventDefault();
+    if (!newKeyword.trim()) return;
+    if (onAddFilter) {
+      onAddFilter(newKeyword.trim(), newField);
+    }
+    setNewKeyword('');
+    setShowAddFilterForm(false);
   };
 
   const navItems = [
@@ -188,6 +207,98 @@ export default function Sidebar({
               );
             })
           )}
+        </div>
+
+        {/* Global Keyword Ingestion Filters Section */}
+        <div className="sidebar-group" style={{ marginTop: '16px' }}>
+          <div className="mailbox-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <span className="sidebar-section-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Filter size={12} color="#4f46e5" /> Ingestion Filters ({filters.length})
+            </span>
+            <button
+              className="btn-text-add"
+              onClick={() => setShowAddFilterForm(!showAddFilterForm)}
+              title="Add Keyword Filter"
+            >
+              <Plus size={14} /> Add
+            </button>
+          </div>
+
+          {/* Form to add filter */}
+          {showAddFilterForm && (
+            <form onSubmit={handleCreateFilterSubmit} style={{ background: '#f8fafc', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <input
+                type="text"
+                placeholder="Keyword (e.g. invoice, urgent)"
+                value={newKeyword}
+                onChange={(e) => setNewKeyword(e.target.value)}
+                style={{ padding: '6px 8px', fontSize: '12px', border: '1px solid #cbd5e1', borderRadius: '4px', outline: 'none' }}
+                autoFocus
+              />
+
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <select
+                  value={newField}
+                  onChange={(e) => setNewField(e.target.value)}
+                  style={{ flex: 1, padding: '4px 6px', fontSize: '11.5px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                >
+                  <option value="any">Field: Any</option>
+                  <option value="subject">Field: Subject</option>
+                  <option value="sender">Field: Sender</option>
+                  <option value="body">Field: Body</option>
+                </select>
+
+                <button
+                  type="submit"
+                  style={{ padding: '4px 10px', background: '#4f46e5', color: 'white', border: 'none', borderRadius: '4px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Save
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Filter Chips Container */}
+          {filters.length === 0 ? (
+            <div style={{ fontSize: '11.5px', color: '#64748b', fontStyle: 'italic', padding: '6px 4px' }}>
+              No active filters. Ingesting all inbound emails within 24h window.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '4px 0' }}>
+              {filters.map((flt) => (
+                <div
+                  key={flt.id}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '3px 8px',
+                    background: '#e0e7ff',
+                    color: '#3730a3',
+                    borderRadius: '12px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    border: '1px solid #c7d2fe'
+                  }}
+                >
+                  <Tag size={10} color="#4338ca" />
+                  <span>{flt.keyword}</span>
+                  <span style={{ fontSize: '9.5px', opacity: 0.75 }}>({flt.field})</span>
+                  <button
+                    onClick={() => onDeleteFilter && onDeleteFilter(flt.id)}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 0, color: '#ef4444', display: 'flex', alignItems: 'center' }}
+                    title={`Delete filter '${flt.keyword}'`}
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ fontSize: '10.5px', color: '#94a3b8', fontStyle: 'italic', marginTop: '6px' }}>
+            Filters apply to all connected accounts going forward.
+          </div>
         </div>
       </div>
 

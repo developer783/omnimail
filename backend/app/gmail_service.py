@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Dict, Any
 import httpx
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import ConnectedAccount, Email
+from app.models import ConnectedAccount, Email, KeywordFilter
 from app.security import decrypt_token, encrypt_token
 
 logger = logging.getLogger("gmail_service")
@@ -23,7 +23,6 @@ def get_valid_access_token(db: Session, account: ConnectedAccount) -> str:
     decrypted_refresh_token = decrypt_token(account.refresh_token)
 
     now = datetime.datetime.utcnow()
-    # Check if token is expired or expires within 2 minutes
     is_expired = False
     if account.token_expiry and (account.token_expiry - now).total_seconds() < 120:
         is_expired = True
@@ -34,7 +33,6 @@ def get_valid_access_token(db: Session, account: ConnectedAccount) -> str:
     if decrypted_access_token and decrypted_access_token.startswith("demo_"):
         return decrypted_access_token
 
-    # Token is expired, refresh it
     logger.info(f"[Token Refresh] Refreshing access token for account {account.google_email}...")
     payload = {
         "client_id": settings.GOOGLE_CLIENT_ID,
@@ -69,7 +67,6 @@ def get_valid_access_token(db: Session, account: ConnectedAccount) -> str:
 
 
 def _decode_body_data(data_b64: str) -> str:
-    """Decodes base64url encoded string into UTF-8 decoded text."""
     if not data_b64:
         return ""
     pad = len(data_b64) % 4
@@ -84,10 +81,6 @@ def _decode_body_data(data_b64: str) -> str:
 
 
 def _extract_body_from_payload(payload: Dict[str, Any]) -> str:
-    """
-    Traverses MIME structure recursively to extract original HTML body.
-    If no HTML part exists, falls back to plain text.
-    """
     html_body = ""
     text_body = ""
 
@@ -121,7 +114,6 @@ def _extract_body_from_payload(payload: Dict[str, Any]) -> str:
 
 
 def _parse_header(headers: list, name: str, default: str = "") -> str:
-    """Extracts a specific header value (case-insensitive)."""
     for h in headers:
         if h.get("name", "").lower() == name.lower():
             return h.get("value", default)
@@ -129,16 +121,12 @@ def _parse_header(headers: list, name: str, default: str = "") -> str:
 
 
 def send_gmail_mime_message(db: Session, account: ConnectedAccount, raw_mime_bytes: bytes, thread_id: Optional[str] = None) -> dict:
-    """
-    Sends an RFC822 formatted MIME email message via Google's Gmail API `users.messages.send`.
-    """
     access_token = get_valid_access_token(db, account)
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"
     }
 
-    # Encode raw bytes as URL-safe base64 string
     encoded_raw = base64.urlsafe_b64encode(raw_mime_bytes).decode("utf-8")
 
     payload = {"raw": encoded_raw}
@@ -163,7 +151,8 @@ def send_gmail_mime_message(db: Session, account: ConnectedAccount, raw_mime_byt
 def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, max_results: int = 50) -> int:
     """
     Fetches recent emails from Gmail for given account received within the trailing 24 hours (q='newer_than:1d').
-    Persists only messages with received_at >= now - 24 hours.
+    If keyword filters exist in DB, incorporates them into Gmail API query AND performs second-pass exact substring checks.
+    Persists only matching messages with received_at >= now - 24 hours.
     Returns number of newly inserted emails.
     """
     logger.info(f"[Backfill Job Start] Starting email fetch for account_id={account.id} ({account.google_email})")
@@ -172,11 +161,32 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
 
     cutoff_24h = datetime.datetime.utcnow() - datetime.timedelta(hours=24)
 
+    # 0. Fetch active global keyword filters
+    active_filters = db.query(KeywordFilter).all()
+    base_q = "newer_than:1d"
+
+    if active_filters:
+        kw_terms = []
+        for f in active_filters:
+            kw = f.keyword.strip()
+            if not kw:
+                continue
+            clean_kw = kw.replace('"', '\\"')
+            if f.field == "subject":
+                kw_terms.append(f'subject:("{clean_kw}")')
+            elif f.field == "sender":
+                kw_terms.append(f'from:("{clean_kw}")')
+            else:
+                kw_terms.append(f'"{clean_kw}"')
+
+        if kw_terms:
+            or_clause = " OR ".join(kw_terms)
+            base_q = f"newer_than:1d ({or_clause})"
+
     try:
         access_token = get_valid_access_token(db, account)
         headers = {"Authorization": f"Bearer {access_token}"}
 
-        # Handle demo accounts gracefully
         if access_token.startswith("demo_"):
             account.sync_status = "success"
             account.last_synced_at = datetime.datetime.utcnow()
@@ -184,8 +194,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
             db.commit()
             return 0
 
-        # 1. Fetch message list restricted to trailing 24 hours query (or fallback to recent if 0)
-        query_params = {"maxResults": max_results, "q": "newer_than:1d"}
+        query_params = {"maxResults": max_results, "q": base_q}
         logger.info(f"[Backfill Job API Query] GET {GMAIL_API_BASE}/messages params={query_params}")
 
         with httpx.Client(timeout=30.0) as client:
@@ -195,7 +204,6 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 params=query_params
             )
 
-            # Check for insufficient permissions error
             if list_resp.status_code == 403 and "insufficientPermissions" in list_resp.text:
                 err_msg = "Re-authorization required for updated Gmail API scopes. Please click 'Add Account' to reconnect."
                 logger.warning(f"[Backfill Job Scope Warning] Account {account.google_email} needs re-authorization: {list_resp.text}")
@@ -214,18 +222,6 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
             messages_data = list_resp.json().get("messages", [])
             logger.info(f"[Backfill Job API Response] Gmail API returned {len(messages_data)} message(s) for account '{account.google_email}'")
 
-            # Fallback: If 24-hour query returns 0 messages, try fetching recent 10 messages to ensure inbox isn't empty if user's last email was older
-            if not messages_data:
-                logger.info(f"[Backfill Job Fallback] 'newer_than:1d' returned 0 messages for {account.google_email}. Fallback query for recent messages...")
-                fallback_resp = client.get(
-                    f"{GMAIL_API_BASE}/messages",
-                    headers=headers,
-                    params={"maxResults": 15}
-                )
-                if fallback_resp.status_code == 200:
-                    messages_data = fallback_resp.json().get("messages", [])
-                    logger.info(f"[Backfill Job Fallback Response] Fallback query returned {len(messages_data)} message(s)")
-
             if not messages_data:
                 account.sync_status = "success"
                 account.last_synced_at = datetime.datetime.utcnow()
@@ -233,7 +229,6 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 db.commit()
                 return 0
 
-            # Get existing gmail_message_ids for this account to skip duplicates
             existing_ids = set(
                 row[0] for row in db.query(Email.gmail_message_id)
                 .filter(Email.account_id == account.id)
@@ -246,7 +241,6 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 if msg_id in existing_ids:
                     continue
 
-                # Fetch full message detail
                 detail_resp = client.get(
                     f"{GMAIL_API_BASE}/messages/{msg_id}",
                     headers=headers,
@@ -261,7 +255,6 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 payload = msg_detail.get("payload", {})
                 msg_headers = payload.get("headers", [])
 
-                # Determine received timestamp
                 internal_date_ms = msg_detail.get("internalDate")
                 if internal_date_ms:
                     received_at = datetime.datetime.utcfromtimestamp(int(internal_date_ms) / 1000.0)
@@ -273,6 +266,30 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 subject = _parse_header(msg_headers, "Subject", default="(No Subject)")
                 message_id_hdr = _parse_header(msg_headers, "Message-ID", default=f"<{msg_id}@mail.gmail.com>")
                 html_body = _extract_body_from_payload(payload)
+
+                # Second pass keyword verification if filters exist
+                if active_filters:
+                    matches_filter = False
+                    for f in active_filters:
+                        kw_lower = f.keyword.lower().strip()
+                        if not kw_lower:
+                            continue
+                        if f.field == "subject" and kw_lower in subject.lower():
+                            matches_filter = True
+                            break
+                        elif f.field == "sender" and kw_lower in sender.lower():
+                            matches_filter = True
+                            break
+                        elif f.field == "body" and kw_lower in html_body.lower():
+                            matches_filter = True
+                            break
+                        elif f.field == "any" and (kw_lower in subject.lower() or kw_lower in sender.lower() or kw_lower in html_body.lower()):
+                            matches_filter = True
+                            break
+
+                    if not matches_filter:
+                        logger.info(f"Skipping msg_id={msg_id}: does not match active keyword filters")
+                        continue
 
                 new_email = Email(
                     account_id=account.id,
@@ -294,7 +311,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
             account.error_message = None
             db.commit()
 
-            logger.info(f"[Backfill Job Complete] Account '{account.google_email}' (ID={account.id}): Successfully inserted {new_emails_count} new email(s) into database!")
+            logger.info(f"[Backfill Job Complete] Account '{account.google_email}' (ID={account.id}): Inserted {new_emails_count} matching email(s) into database!")
             return new_emails_count
 
     except Exception as e:

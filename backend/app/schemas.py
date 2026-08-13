@@ -65,6 +65,19 @@ class EmailForwardRequest(BaseModel):
     cc: Optional[str] = None
     bcc: Optional[str] = None
 
+class KeywordFilterCreate(BaseModel):
+    keyword: str
+    field: str = "any" # 'subject', 'sender', 'body', 'any'
+
+class KeywordFilterOut(BaseModel):
+    id: int
+    keyword: str
+    field: str
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
 class FolderCounts(BaseModel):
     inbox: int = 0
     unread: int = 0
@@ -78,6 +91,7 @@ class EmailListResponse(BaseModel):
     total: int
     accounts: List[ConnectedAccountOut]
     folder_counts: FolderCounts
+    filters: List[KeywordFilterOut] = []
 
 class SyncResponse(BaseModel):
     message: str

@@ -41,3 +41,11 @@ class Email(Base):
     )
 
     account = relationship("ConnectedAccount", back_populates="emails")
+
+class KeywordFilter(Base):
+    __tablename__ = "keyword_filters"
+
+    id = Column(Integer, primary_key=True, index=True)
+    keyword = Column(String(255), nullable=False)
+    field = Column(String(50), nullable=False, default="any") # 'subject', 'sender', 'body', 'any'
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)

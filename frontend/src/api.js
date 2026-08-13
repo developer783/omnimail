@@ -108,5 +108,16 @@ export const api = {
       body: JSON.stringify(forwardData),
     }),
 
+  getFilters: () => request('/filters'),
+
+  createFilter: (keyword, field = 'any') =>
+    request('/filters', {
+      method: 'POST',
+      body: JSON.stringify({ keyword, field }),
+    }),
+
+  deleteFilter: (filterId) =>
+    request(`/filters/${filterId}`, { method: 'DELETE' }),
+
   syncEmails: () => request('/emails/sync', { method: 'POST' }),
 };

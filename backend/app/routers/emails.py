@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
 from app.database import get_db
-from app.models import ConnectedAccount, Email
+from app.models import ConnectedAccount, Email, KeywordFilter
 from app.schemas import (
     EmailOut, EmailListResponse, SyncResponse, FolderCounts, EmailUpdate,
     EmailReplyRequest, EmailForwardRequest
@@ -113,12 +113,14 @@ def get_emails(
     )
 
     accounts_meta = list_connected_accounts(db=db, current_user=current_user)
+    filters_data = db.query(KeywordFilter).order_by(KeywordFilter.created_at.desc()).all()
 
     return EmailListResponse(
         items=email_out_items,
         total=total_count,
         accounts=accounts_meta,
-        folder_counts=folder_counts
+        folder_counts=folder_counts,
+        filters=filters_data
     )
 
 @router.get("/{email_id}", response_model=EmailOut)

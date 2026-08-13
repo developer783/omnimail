@@ -27,6 +27,7 @@ export default function App() {
   const [disconnectingAccount, setDisconnectingAccount] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [filters, setFilters] = useState([]);
   const [notification, setNotification] = useState(null);
   const [lastCheckedTime, setLastCheckedTime] = useState('just now');
 
@@ -44,7 +45,7 @@ export default function App() {
     }
   }, []);
 
-  // Fetch emails, folder counts, and connected accounts
+  // Fetch emails, folder counts, connected accounts, and keyword filters
   const loadData = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
@@ -52,6 +53,7 @@ export default function App() {
       setEmails(response.items || []);
       setAccounts(response.accounts || []);
       setFolderCounts(response.folder_counts || {});
+      setFilters(response.filters || []);
       setLastCheckedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
       // Keep selected email updated if it exists in current payload
@@ -186,6 +188,26 @@ export default function App() {
     }
   };
 
+  const handleAddFilter = async (keyword, field) => {
+    try {
+      await api.createFilter(keyword, field);
+      setNotification({ type: 'success', text: `Added ingestion filter '${keyword}' (${field})` });
+      await loadData();
+    } catch (err) {
+      setNotification({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleDeleteFilter = async (filterId) => {
+    try {
+      await api.deleteFilter(filterId);
+      setNotification({ type: 'success', text: 'Deleted ingestion filter' });
+      await loadData();
+    } catch (err) {
+      setNotification({ type: 'error', text: err.message });
+    }
+  };
+
   const handleLogout = async () => {
     await api.logout();
     setIsAuthenticated(false);
@@ -266,6 +288,9 @@ export default function App() {
             setSelectedEmail(null);
           }}
           folderCounts={folderCounts}
+          filters={filters}
+          onAddFilter={handleAddFilter}
+          onDeleteFilter={handleDeleteFilter}
           onOpenCompose={() => setIsComposeOpen(true)}
           onRequestDisconnect={(acc) => setDisconnectingAccount(acc)}
           onSync={handleSync}
