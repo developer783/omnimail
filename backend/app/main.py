@@ -1,7 +1,10 @@
+import os
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from app.config import settings
 from app.database import engine, Base
@@ -60,15 +63,6 @@ app.include_router(google_oauth_router)
 app.include_router(emails_router)
 app.include_router(filters_router)
 
-@app.get("/", tags=["Root"])
-def root():
-    return {
-        "status": "online",
-        "message": "Omnimail FastAPI Backend Server is running successfully!",
-        "documentation": "/docs",
-        "health_check": "/health"
-    }
-
 @app.get("/health", tags=["Health"])
 def health_check():
     return {
@@ -76,3 +70,30 @@ def health_check():
         "app_name": settings.APP_NAME,
         "environment": settings.ENV
     }
+
+# Check for compiled frontend build directory
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../frontend/dist"))
+assets_dir = os.path.join(frontend_dist, "assets")
+
+if os.path.exists(frontend_dist) and os.path.exists(assets_dir):
+    logger.info(f"Mounting static frontend build from {frontend_dist}")
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="static_assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        # Allow API endpoints like /health, /docs, /openapi.json to bypass SPA handler
+        if full_path in ["health", "docs", "openapi.json", "redoc"]:
+            return None
+        file_path = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
+else:
+    @app.get("/", tags=["Root"])
+    def root():
+        return {
+            "status": "online",
+            "message": "Omnimail FastAPI Backend Server is running successfully!",
+            "documentation": "/docs",
+            "health_check": "/health"
+        }
