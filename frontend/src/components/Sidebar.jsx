@@ -150,6 +150,11 @@ export default function Sidebar({
               const isSelected = selectedAccount === acc.id;
               const firstLetter = (acc.google_email || 'G').charAt(0).toUpperCase();
               const isNeedsReauth = acc.sync_status === 'needs_reauth' || acc.sync_status === 'error';
+              const isNoGmail = acc.sync_status === 'no_gmail';
+
+              let avatarBg = '#4f46e5';
+              if (isNeedsReauth) avatarBg = '#ef4444';
+              if (isNoGmail) avatarBg = '#8b5cf6';
 
               return (
                 <div
@@ -159,13 +164,18 @@ export default function Sidebar({
                   style={{ position: 'relative' }}
                 >
                   <div className="mailbox-info">
-                    <div className="account-avatar-sm" style={{ background: isNeedsReauth ? '#ef4444' : '#4f46e5' }}>
+                    <div className="account-avatar-sm" style={{ background: avatarBg }}>
                       {firstLetter}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                       <span className="mailbox-name" title={acc.google_email}>
                         {acc.google_email}
                       </span>
+                      {isNoGmail && (
+                        <span style={{ fontSize: '9.5px', color: '#7c3aed', fontWeight: 600 }} title="Connected Google Account (No Gmail Inbox on domain)">
+                          Google Account (No Mail)
+                        </span>
+                      )}
                       {isNeedsReauth && (
                         <span
                           style={{ fontSize: '10px', color: '#ef4444', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '2px' }}

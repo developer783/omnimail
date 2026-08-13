@@ -213,10 +213,10 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 return 0
 
             if "Mail service not enabled" in list_resp.text or "FAILED_PRECONDITION" in list_resp.text:
-                err_msg = f"Gmail is not enabled for {account.google_email}. Please connect a standard @gmail.com account or enable Gmail in Google Workspace Admin."
-                logger.warning(f"[Backfill Job Warning] {err_msg}")
-                account.sync_status = "error"
-                account.error_message = err_msg
+                logger.info(f"[Backfill Job Info] Non-mail Google account connected cleanly: '{account.google_email}' (No Gmail Inbox service on domain)")
+                account.sync_status = "no_gmail"
+                account.last_synced_at = datetime.datetime.utcnow()
+                account.error_message = "Connected Google Account (No Gmail Inbox service on domain)"
                 db.commit()
                 return 0
 
