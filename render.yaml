@@ -1,0 +1,52 @@
+services:
+  # Python FastAPI Backend Web Service
+  - type: web
+    name: omnimail-backend
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: "cd backend && pip install -r requirements.txt"
+    startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: omnimail-db
+          property: connectionString
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        value: https://omnimail-backend.onrender.com/auth/google/callback
+      - key: JWT_SECRET
+        generateValue: true
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true
+      - key: SHARED_USERNAME
+        value: admin
+      - key: SHARED_PASSWORD
+        sync: false
+      - key: FRONTEND_URL
+        value: https://omnimail-frontend.onrender.com
+
+  # React Vite Frontend Static Site
+  - type: static
+    name: omnimail-frontend
+    env: static
+    buildCommand: "cd frontend && npm install && npm run build"
+    staticPublishPath: "./frontend/dist"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://omnimail-backend.onrender.com
+
+databases:
+  # PostgreSQL Database Instance
+  - name: omnimail-db
+    databaseName: omnimail
+    user: omnimail_user
+    plan: free
+    region: oregon

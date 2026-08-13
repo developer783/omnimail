@@ -1,0 +1,37 @@
+# Environment variables and secrets
+.env
+.env.local
+backend/.env
+
+# Databases
+*.db
+*.sqlite3
+email_tool.db
+backend/email_tool.db
+
+# Dependencies
+node_modules/
+backend/venv/
+backend/.venv/
+env/
+venv/
+
+# Build outputs
+frontend/dist/
+frontend/build/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+backend/inspect_db.py
+backend/test_api_endpoints.py
+backend/tests/test_multi_account_db.py
+
+# System & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
