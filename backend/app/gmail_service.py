@@ -212,6 +212,14 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 db.commit()
                 return 0
 
+            if "Mail service not enabled" in list_resp.text or "FAILED_PRECONDITION" in list_resp.text:
+                err_msg = f"Gmail is not enabled for {account.google_email}. Please connect a standard @gmail.com account or enable Gmail in Google Workspace Admin."
+                logger.warning(f"[Backfill Job Warning] {err_msg}")
+                account.sync_status = "error"
+                account.error_message = err_msg
+                db.commit()
+                return 0
+
             if list_resp.status_code != 200:
                 err_msg = f"Failed to list messages: {list_resp.status_code} - {list_resp.text}"
                 account.sync_status = "error"

@@ -167,8 +167,11 @@ export default function Sidebar({
                         {acc.google_email}
                       </span>
                       {isNeedsReauth && (
-                        <span style={{ fontSize: '10px', color: '#ef4444', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '2px' }}>
-                          <AlertTriangle size={10} /> Re-connect
+                        <span
+                          style={{ fontSize: '10px', color: '#ef4444', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '2px' }}
+                          title={acc.error_message || 'Account needs attention'}
+                        >
+                          <AlertTriangle size={10} /> {acc.sync_status === 'error' ? 'Sync Error' : 'Re-connect'}
                         </span>
                       )}
                     </div>
