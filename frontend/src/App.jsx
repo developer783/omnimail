@@ -22,6 +22,7 @@ export default function App() {
   const [activeFolder, setActiveFolder] = useState('inbox');
   const [selectedEmail, setSelectedEmail] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [disconnectingAccount, setDisconnectingAccount] = useState(null);
@@ -30,6 +31,14 @@ export default function App() {
   const [filters, setFilters] = useState([]);
   const [notification, setNotification] = useState(null);
   const [lastCheckedTime, setLastCheckedTime] = useState('just now');
+
+  // Debounce search input to prevent rapid un-debounced API calls
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   // 2. Callback Functions (Declared BEFORE any useEffect that references them)
   const checkAuth = useCallback(async () => {
@@ -49,24 +58,23 @@ export default function App() {
   const loadData = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
-      const response = await api.getEmails(selectedAccountId, activeFolder, searchQuery);
+      const response = await api.getEmails(selectedAccountId, activeFolder, debouncedSearchQuery);
       setEmails(response.items || []);
       setAccounts(response.accounts || []);
       setFolderCounts(response.folder_counts || {});
       setFilters(response.filters || []);
       setLastCheckedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
-      // Keep selected email updated if it exists in current payload
-      if (selectedEmail) {
-        const updatedSelected = (response.items || []).find(e => e.id === selectedEmail.id);
-        if (updatedSelected) {
-          setSelectedEmail(updatedSelected);
-        }
-      }
+      // Keep selected email updated without depending on selectedEmail state
+      setSelectedEmail(prevSelected => {
+        if (!prevSelected) return null;
+        const updatedSelected = (response.items || []).find(e => e.id === prevSelected.id);
+        return updatedSelected || prevSelected;
+      });
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     }
-  }, [isAuthenticated, selectedAccountId, activeFolder, searchQuery, selectedEmail]);
+  }, [isAuthenticated, selectedAccountId, activeFolder, debouncedSearchQuery]);
 
   // 3. useEffect Hooks (All functions referenced inside are already declared above)
   useEffect(() => {
@@ -97,8 +105,14 @@ export default function App() {
   }, [loadData]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let isCancelled = false;
+    if (isAuthenticated) {
+      loadData();
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [loadData, isAuthenticated]);
 
   // 4. Action Handlers
   const handleSync = async () => {
@@ -316,6 +330,7 @@ export default function App() {
         />
 
         <EmailDetail
+          key={selectedEmail ? selectedEmail.id : 'empty'}
           email={selectedEmail}
           onToggleStar={handleToggleStar}
           onToggleRead={handleToggleRead}

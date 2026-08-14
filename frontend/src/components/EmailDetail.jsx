@@ -75,10 +75,24 @@ export default function EmailDetail({
   const fileInputRef = useRef(null);
   const photoInputRef = useRef(null);
 
+  // Reset composer state whenever the selected email ID changes
+  useEffect(() => {
+    setComposerMode(null);
+    setToField('');
+    setCcField('');
+    setBccField('');
+    setSubjectField('');
+    setBodyText('');
+    setAttachments([]);
+    setErrorMsg('');
+    setIsPopout(false);
+  }, [email?.id]);
+
   // Auto-save draft to localStorage every 3 seconds
   useEffect(() => {
     if (!email || !composerMode) return;
     const draftKey = `omnimail_draft_${email.id}`;
+    let toastTimeout;
 
     const timer = setInterval(() => {
       const currentHtml = editorRef.current ? editorRef.current.innerHTML : bodyText;
@@ -93,11 +107,15 @@ export default function EmailDetail({
           updatedAt: new Date().toISOString()
         }));
         setDraftSavedToast(true);
-        setTimeout(() => setDraftSavedToast(false), 2000);
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => setDraftSavedToast(false), 2000);
       }
     }, 3000);
 
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      if (toastTimeout) clearTimeout(toastTimeout);
+    };
   }, [email, composerMode, toField, ccField, bccField, subjectField, bodyText]);
 
   // Keyboard shortcut listener: Ctrl+Enter / Cmd+Enter to send, Escape to discard
