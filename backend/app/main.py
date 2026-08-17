@@ -21,8 +21,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-# Automatically create database tables on startup
+# Automatically create database tables on startup with logging verification
+logger.info(f"Connecting to database host: {engine.url.host or 'local'} (database: {engine.url.database})...")
 Base.metadata.create_all(bind=engine)
+logger.info("Successfully connected to PostgreSQL database and verified all database tables!")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

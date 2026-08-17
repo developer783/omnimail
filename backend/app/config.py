@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     def DATABASE_URL(self) -> str:
         url = self._raw_db_url
         if url.startswith("postgres://"):
-            return url.replace("postgres://", "postgresql://", 1)
+            url = url.replace("postgres://", "postgresql://", 1)
         return url
 
     # Google OAuth settings
