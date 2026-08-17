@@ -183,58 +183,6 @@ def google_oauth_callback(
 
     return RedirectResponse(url=f"{settings.FRONTEND_URL}?account_added=true&email={urllib.parse.quote(google_email)}", status_code=307)
 
-@router.post("/auth/google/demo_connect")
-def google_demo_connect(
-    email: Optional[str] = Query("recruiter.team@gmail.com"),
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(verify_jwt_token)
-):
-    """
-    Developer helper endpoint to simulate connecting a Google account for local UI testing.
-    """
-    account = db.query(ConnectedAccount).filter(ConnectedAccount.google_email == email).first()
-    if not account:
-        account = ConnectedAccount(
-            google_email=email,
-            access_token=encrypt_token("demo_access_token"),
-            refresh_token=encrypt_token("demo_refresh_token"),
-            token_expiry=datetime.datetime.utcnow() + datetime.timedelta(days=30),
-            connected_at=datetime.datetime.utcnow(),
-            sync_status="success"
-        )
-        db.add(account)
-        db.commit()
-        db.refresh(account)
-
-        sample_emails = [
-            Email(
-                account_id=account.id,
-                gmail_message_id=f"demo_msg_{account.id}_1",
-                sender="Sarah Jenkins <sarah.j@techrecruiting.io>",
-                subject=f"[{email}] Senior Full Stack Engineer Application - John Doe",
-                html_body=f"""<div style="font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; color: #333;">
-                  <h2 style="color: #4f46e5;">Candidate Profile Submission for {email}</h2>
-                  <p>Hi Recruiting Team,</p>
-                  <p>I have attached the updated resume for <strong>John Doe</strong> applying for the Senior Full Stack Engineer role.</p>
-                  <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                    <strong>Experience:</strong> 7+ years in React, Python, FastAPI, and Postgres.<br/>
-                    <strong>Expected Salary:</strong> $160,000 / year<br/>
-                    <strong>Notice Period:</strong> 2 Weeks
-                  </div>
-                  <p>Best regards,<br/><strong>Sarah Jenkins</strong></p>
-                </div>""",
-                received_at=datetime.datetime.utcnow() - datetime.timedelta(minutes=14),
-                fetched_at=datetime.datetime.utcnow(),
-                is_read=False,
-                is_starred=True,
-                folder_status="inbox"
-            )
-        ]
-        db.add_all(sample_emails)
-        db.commit()
-
-    return {"message": f"Demo account {email} connected successfully", "account_id": account.id}
-
 @router.get("/accounts", response_model=List[ConnectedAccountOut])
 def list_connected_accounts(
     db: Session = Depends(get_db),

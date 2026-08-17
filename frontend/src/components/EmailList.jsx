@@ -13,7 +13,11 @@ export default function EmailList({
 }) {
   const formatDateInfo = (dateString) => {
     try {
-      const d = new Date(dateString);
+      let dateStr = dateString;
+      if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+')) {
+        dateStr = dateStr + 'Z';
+      }
+      const d = new Date(dateStr);
       const now = new Date();
       const diffHours = (now.getTime() - d.getTime()) / (1000 * 60 * 60);
 

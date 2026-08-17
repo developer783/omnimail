@@ -15,14 +15,11 @@ class Settings(BaseSettings):
     JWT_EXPIRE_DAYS: int = 90 # 90-day persistent long-lived session
 
     # Token Encryption Key for stored OAuth credentials
-    TOKEN_ENCRYPTION_KEY: str = os.getenv(
-        "TOKEN_ENCRYPTION_KEY",
-        Fernet.generate_key().decode()
-    )
+    TOKEN_ENCRYPTION_KEY: str = os.getenv("TOKEN_ENCRYPTION_KEY") or Fernet.generate_key().decode()
 
     # Database configuration
     # Render provides postgres:// which SQLAlchemy 2.0 requires as postgresql://
-    _raw_db_url: str = os.getenv("DATABASE_URL", "sqlite:///./email_tool.db")
+    _raw_db_url: str = os.getenv("DATABASE_URL") or "postgresql://omnimail:omnimail_password@localhost:5432/omnimail"
     
     @property
     def DATABASE_URL(self) -> str:

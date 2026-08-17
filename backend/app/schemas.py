@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, field_serializer
 
 class LoginRequest(BaseModel):
     username: str
@@ -28,6 +28,17 @@ class ConnectedAccountOut(BaseModel):
     class Config:
         from_attributes = True
 
+class EmailAttachmentOut(BaseModel):
+    id: int
+    email_id: int
+    filename: str
+    mime_type: str
+    gmail_attachment_id: str
+    size_bytes: int
+
+    class Config:
+        from_attributes = True
+
 class EmailOut(BaseModel):
     id: int
     account_id: int
@@ -44,6 +55,18 @@ class EmailOut(BaseModel):
     is_read: bool = False
     is_starred: bool = False
     folder_status: str = "inbox"
+    attachments: List[EmailAttachmentOut] = []
+
+    @field_serializer("received_at", "fetched_at", mode="plain")
+    def serialize_datetime(self, dt: Optional[datetime.datetime]) -> Optional[str]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        iso_str = dt.isoformat()
+        if not iso_str.endswith("Z") and not "+" in iso_str:
+            iso_str += "Z"
+        return iso_str.replace("+00:00", "Z")
 
     class Config:
         from_attributes = True

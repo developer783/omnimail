@@ -44,17 +44,7 @@ export default function Sidebar({
       const url = await api.getGoogleOAuthUrl();
       window.location.href = url;
     } catch (err) {
-      if (window.confirm(`${err.message}\n\nWould you like to connect a demo Google Account for instant testing?`)) {
-        try {
-          const demoEmail = prompt("Enter Google email address for demo account:", `recruiter.${accounts.length + 1}@gmail.com`);
-          if (demoEmail) {
-            await api.demoConnectAccount(demoEmail);
-            if (onRefreshAccounts) onRefreshAccounts();
-          }
-        } catch (e) {
-          alert(`Failed to add demo account: ${e.message}`);
-        }
-      }
+      alert(`Failed to start Google OAuth flow: ${err.message}`);
     }
   };
 

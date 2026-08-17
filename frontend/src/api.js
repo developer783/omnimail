@@ -75,10 +75,7 @@ export const api = {
     return data.url;
   },
 
-  demoConnectAccount: (email = 'recruiter.team@gmail.com') =>
-    request(`/auth/google/demo_connect?email=${encodeURIComponent(email)}`, {
-      method: 'POST',
-    }),
+
 
   getEmails: (accountId = null, folder = 'inbox', searchQuery = '') => {
     const params = new URLSearchParams();
@@ -120,4 +117,22 @@ export const api = {
     request(`/filters/${filterId}`, { method: 'DELETE' }),
 
   syncEmails: () => request('/emails/sync', { method: 'POST' }),
+
+  downloadAttachment: async (emailId, attachmentId, filename) => {
+    const token = getStoredToken();
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const resp = await fetch(`/emails/${emailId}/attachments/${attachmentId}/download`, { headers });
+    if (!resp.ok) throw new Error('Failed to download attachment');
+    const blob = await resp.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'attachment';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
 };

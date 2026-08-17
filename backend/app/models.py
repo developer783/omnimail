@@ -30,8 +30,8 @@ class Email(Base):
     recipient = Column(String(512), nullable=True)
     subject = Column(String(1024), nullable=False, default="No Subject")
     html_body = Column(Text, nullable=False)
-    received_at = Column(DateTime, nullable=False, index=True)
-    fetched_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+    received_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    fetched_at = Column(DateTime(timezone=True), default=datetime.datetime.now(datetime.timezone.utc), nullable=False)
     is_read = Column(Boolean, default=False, nullable=False, index=True)
     is_starred = Column(Boolean, default=False, nullable=False, index=True)
     folder_status = Column(String(50), default="inbox", nullable=False, index=True) # 'inbox', 'follow_up', 'replied', 'snoozed'
@@ -41,6 +41,19 @@ class Email(Base):
     )
 
     account = relationship("ConnectedAccount", back_populates="emails")
+    attachments = relationship("EmailAttachment", back_populates="email", cascade="all, delete-orphan")
+
+class EmailAttachment(Base):
+    __tablename__ = "email_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email_id = Column(Integer, ForeignKey("emails.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String(512), nullable=False)
+    mime_type = Column(String(255), nullable=False, default="application/octet-stream")
+    gmail_attachment_id = Column(Text, nullable=False)
+    size_bytes = Column(Integer, nullable=False, default=0)
+
+    email = relationship("Email", back_populates="attachments")
 
 class KeywordFilter(Base):
     __tablename__ = "keyword_filters"

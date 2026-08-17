@@ -9,29 +9,29 @@ from app.config import settings
 
 # Initialize Fernet cipher for token encryption at rest
 def _get_fernet() -> Fernet:
-    key = settings.TOKEN_ENCRYPTION_KEY.encode()
-    # Ensure key is valid 32-byte urlsafe base64
+    raw_key = settings.TOKEN_ENCRYPTION_KEY
+    if not raw_key:
+        raise ValueError("TOKEN_ENCRYPTION_KEY is missing or empty in configuration")
+    key = raw_key.encode("utf-8")
     try:
         return Fernet(key)
-    except Exception:
-        # Fallback to deterministic key derivation if key is raw string
-        hashed_key = base64.urlsafe_b64encode(settings.JWT_SECRET.zfill(32)[:32].encode())
-        return Fernet(hashed_key)
-
-_fernet = _get_fernet()
+    except Exception as e:
+        raise ValueError(f"Invalid TOKEN_ENCRYPTION_KEY provided: {e}. Key must be 32 url-safe base64-encoded bytes.")
 
 def encrypt_token(plain_token: str) -> str:
     """Encrypt OAuth access/refresh token for database storage."""
     if not plain_token:
         return ""
-    return _fernet.encrypt(plain_token.encode("utf-8")).decode("utf-8")
+    fernet = _get_fernet()
+    return fernet.encrypt(plain_token.encode("utf-8")).decode("utf-8")
 
 def decrypt_token(encrypted_token: str) -> str:
     """Decrypt OAuth token retrieved from database."""
     if not encrypted_token:
         return ""
+    fernet = _get_fernet()
     try:
-        return _fernet.decrypt(encrypted_token.encode("utf-8")).decode("utf-8")
+        return fernet.decrypt(encrypted_token.encode("utf-8")).decode("utf-8")
     except Exception as e:
         raise ValueError(f"Failed to decrypt token: {e}")
 

@@ -154,7 +154,11 @@ export default function EmailDetail({
   
   let formattedDate = email.received_at;
   try {
-    formattedDate = format(new Date(email.received_at), 'EEEE, MMMM d, yyyy @ h:mm a');
+    let dateStr = email.received_at;
+    if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+')) {
+      dateStr = dateStr + 'Z';
+    }
+    formattedDate = format(new Date(dateStr), 'EEEE, MMMM d, yyyy @ h:mm a');
   } catch (e) {
     // Keep raw date string
   }
@@ -441,9 +445,55 @@ export default function EmailDetail({
           title="Email Content Sandbox"
           className="email-iframe"
           srcDoc={email.html_body}
-          sandbox="allow-popups allow-same-origin allow-scripts"
+          sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
         />
       </div>
+
+      {/* Received Email Attachments Section */}
+      {email.attachments && email.attachments.length > 0 && (
+        <div style={{ padding: '16px 24px', background: '#f8fafc', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
+            <Paperclip size={16} color="#4f46e5" />
+            <span>Attachments ({email.attachments.length})</span>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+            {email.attachments.map((att) => (
+              <div
+                key={att.id}
+                onClick={async () => {
+                  try {
+                    await api.downloadAttachment(email.id, att.id, att.filename);
+                  } catch (err) {
+                    alert('Download failed: ' + err.message);
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '10px 14px',
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
+                  transition: 'all 0.15s ease'
+                }}
+                title={`Click to download ${att.filename}`}
+              >
+                <Paperclip size={18} color="#6366f1" />
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{att.filename}</span>
+                  <span style={{ fontSize: '11px', color: '#64748b' }}>
+                    {att.size_bytes > 0 ? (att.size_bytes / 1024).toFixed(1) + ' KB' : att.mime_type}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Inline Reply / Forward Controls Section */}
       <div style={{ borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '16px 24px' }}>

@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Dict, Any
 import httpx
 from sqlalchemy.orm import Session
 from app.config import settings
-from app.models import ConnectedAccount, Email, KeywordFilter
+from app.models import ConnectedAccount, Email, KeywordFilter, EmailAttachment
 from app.security import decrypt_token, encrypt_token
 
 logger = logging.getLogger("gmail_service")
@@ -80,19 +80,104 @@ def _decode_body_data(data_b64: str) -> str:
         return ""
 
 
-def _extract_body_from_payload(payload: Dict[str, Any]) -> str:
+import re
+
+def _linkify_plain_text(text_content: str) -> str:
+    """
+    Escapes HTML entities and converts raw URLs and email addresses into clickable <a href="..."> links,
+    matching Gmail's native plain-text email reading pane behavior.
+    """
+    escaped = (
+        text_content.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    url_pattern = re.compile(
+        r'(?P<url>(?:https?://|www\.)[^\s<>"\'\(\)]+?(?=[.,;:\?\)]?(?:\s|$)))',
+        re.IGNORECASE
+    )
+    def replace_url(m):
+        u = m.group("url")
+        href = u if u.lower().startswith("http") else f"http://{u}"
+        return f'<a href="{href}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">{u}</a>'
+
+    linkified = url_pattern.sub(replace_url, escaped)
+    email_pattern = re.compile(
+        r'(?P<email>\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)',
+        re.IGNORECASE
+    )
+    def replace_email(m):
+        e = m.group("email")
+        return f'<a href="mailto:{e}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">{e}</a>'
+
+    return email_pattern.sub(replace_email, linkified)
+
+
+def _get_header_val(headers: list, name: str) -> str:
+    for h in headers:
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "")
+    return ""
+
+
+def _extract_body_and_attachments(db: Session, account: ConnectedAccount, gmail_msg_id: str, payload: Dict[str, Any]) -> Tuple[str, list]:
     html_body = ""
     text_body = ""
+    inline_cids: Dict[str, str] = {}
+    attachments: list = []
 
     def _walk_parts(part: Dict[str, Any]):
-        nonlocal html_body, text_body
+        nonlocal html_body, text_body, inline_cids, attachments
+        filename = part.get("filename", "")
         mime_type = part.get("mimeType", "")
-        body_data = part.get("body", {}).get("data", "")
+        body = part.get("body", {})
+        body_data = body.get("data", "")
+        attachment_id = body.get("attachmentId", "")
+        size_bytes = body.get("size", 0)
 
-        if mime_type == "text/html" and body_data and not html_body:
-            html_body = _decode_body_data(body_data)
-        elif mime_type == "text/plain" and body_data and not text_body:
-            text_body = _decode_body_data(body_data)
+        headers = part.get("headers", [])
+        content_id = _get_header_val(headers, "Content-ID") or _get_header_val(headers, "Content-Id") or _get_header_val(headers, "X-Attachment-Id")
+        clean_cid = content_id.strip("<>").strip()
+
+        # Extract inline CID image
+        if clean_cid:
+            b64_str = body_data
+            if not b64_str and attachment_id:
+                try:
+                    file_bytes = download_attachment_data(db, account, gmail_msg_id, attachment_id)
+                    b64_str = base64.urlsafe_b64encode(file_bytes).decode("utf-8")
+                except Exception as e:
+                    logger.warning(f"Could not fetch inline CID image bytes for '{clean_cid}': {e}")
+
+            if b64_str:
+                pad = len(b64_str) % 4
+                if pad:
+                    b64_str += "=" * (4 - pad)
+                std_b64 = b64_str.replace("-", "+").replace("_", "/")
+                data_uri = f"data:{mime_type or 'image/png'};base64,{std_b64}"
+                inline_cids[clean_cid] = data_uri
+
+        # Extract true downloadable attachments (not CID inline images)
+        if (filename and attachment_id and not clean_cid) or (filename and size_bytes > 0 and attachment_id and not clean_cid):
+            attachments.append({
+                "filename": filename,
+                "mime_type": mime_type or "application/octet-stream",
+                "attachment_id": attachment_id,
+                "size_bytes": size_bytes
+            })
+        elif attachment_id and not filename and not clean_cid:
+            synthetic_filename = f"attachment_{len(attachments)+1}"
+            attachments.append({
+                "filename": synthetic_filename,
+                "mime_type": mime_type or "application/octet-stream",
+                "attachment_id": attachment_id,
+                "size_bytes": size_bytes
+            })
+        elif not clean_cid and not attachment_id:
+            if mime_type == "text/html" and body_data and not html_body:
+                html_body = _decode_body_data(body_data)
+            elif mime_type == "text/plain" and body_data and not text_body:
+                text_body = _decode_body_data(body_data)
 
         parts = part.get("parts", [])
         for sub_part in parts:
@@ -100,17 +185,53 @@ def _extract_body_from_payload(payload: Dict[str, Any]) -> str:
 
     _walk_parts(payload)
 
+    final_body = ""
     if html_body.strip():
-        return html_body
+        final_body = html_body
     elif text_body.strip():
-        escaped_text = (
-            text_body.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-        return f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; line-height: 1.6; color: #222; padding: 16px;"><pre style="white-space: pre-wrap; word-wrap: break-word;">{escaped_text}</pre></div>'
+        linkified_text = _linkify_plain_text(text_body)
+        final_body = f'<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; line-height: 1.6; color: #222; padding: 16px;"><pre style="white-space: pre-wrap; word-wrap: break-word;">{linkified_text}</pre></div>'
     else:
-        return '<div style="font-family: sans-serif; color: #888; padding: 20px;"><em>(No body content available)</em></div>'
+        final_body = '<div style="font-family: sans-serif; color: #888; padding: 20px;"><em>(No body content available)</em></div>'
+
+    # Replace all cid: Content-ID references in HTML body with Data URIs
+    for cid, data_uri in inline_cids.items():
+        final_body = final_body.replace(f"cid:{cid}", data_uri)
+        final_body = final_body.replace(f"cid:<{cid}>", data_uri)
+        final_body = final_body.replace(f"cid:%3C{cid}%3E", data_uri)
+
+    # Inject <base target="_blank"> so all links inside iframe open in new tab
+    if "<head>" in final_body.lower():
+        idx = final_body.lower().find("<head>") + 6
+        final_body = final_body[:idx] + '<base target="_blank">' + final_body[idx:]
+    elif "<html>" in final_body.lower():
+        idx = final_body.lower().find("<html>") + 6
+        final_body = final_body[:idx] + '<head><base target="_blank"></head>' + final_body[idx:]
+    else:
+        final_body = '<base target="_blank">' + final_body
+
+    return final_body, attachments
+
+
+def download_attachment_data(db: Session, account: ConnectedAccount, gmail_message_id: str, attachment_id: str) -> bytes:
+    """Fetch base64 attachment payload on-demand from Gmail API."""
+    access_token = get_valid_access_token(db, account)
+    headers = {"Authorization": f"Bearer {access_token}"}
+    
+    url = f"{GMAIL_API_BASE}/messages/{gmail_message_id}/attachments/{attachment_id}"
+    with httpx.Client(timeout=30.0) as client:
+        resp = client.get(url, headers=headers)
+        if resp.status_code != 200:
+            raise ValueError(f"Failed to download attachment from Gmail API: {resp.status_code} - {resp.text}")
+        
+        data_b64 = resp.json().get("data", "")
+        if not data_b64:
+            return b""
+        
+        pad = len(data_b64) % 4
+        if pad:
+            data_b64 += "=" * (4 - pad)
+        return base64.urlsafe_b64decode(data_b64)
 
 
 def _parse_header(headers: list, name: str, default: str = "") -> str:
@@ -265,15 +386,15 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
 
                 internal_date_ms = msg_detail.get("internalDate")
                 if internal_date_ms:
-                    received_at = datetime.datetime.utcfromtimestamp(int(internal_date_ms) / 1000.0)
+                    received_at = datetime.datetime.fromtimestamp(int(internal_date_ms) / 1000.0, tz=datetime.timezone.utc)
                 else:
-                    received_at = datetime.datetime.utcnow()
+                    received_at = datetime.datetime.now(datetime.timezone.utc)
 
                 sender = _parse_header(msg_headers, "From", default="Unknown Sender")
                 recipient = _parse_header(msg_headers, "To", default=account.google_email)
                 subject = _parse_header(msg_headers, "Subject", default="(No Subject)")
                 message_id_hdr = _parse_header(msg_headers, "Message-ID", default=f"<{msg_id}@mail.gmail.com>")
-                html_body = _extract_body_from_payload(payload)
+                html_body, attachments_meta = _extract_body_and_attachments(db, account, msg_id, payload)
 
                 # Second pass keyword verification if filters exist
                 if active_filters:
@@ -309,9 +430,21 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                     subject=subject,
                     html_body=html_body,
                     received_at=received_at,
-                    fetched_at=datetime.datetime.utcnow()
+                    fetched_at=datetime.datetime.now(datetime.timezone.utc)
                 )
                 db.add(new_email)
+                db.flush()
+
+                for att_meta in attachments_meta:
+                    att = EmailAttachment(
+                        email_id=new_email.id,
+                        filename=att_meta["filename"],
+                        mime_type=att_meta["mime_type"],
+                        gmail_attachment_id=att_meta["attachment_id"],
+                        size_bytes=att_meta["size_bytes"]
+                    )
+                    db.add(att)
+
                 new_emails_count += 1
 
             account.sync_status = "success"
