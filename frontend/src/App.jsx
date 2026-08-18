@@ -72,10 +72,13 @@ export default function App() {
         const updatedSelected = allItems.find(e => e.id === prevSelected.id);
         if (!updatedSelected) return prevSelected;
         
-        const threadKey = updatedSelected.gmail_thread_id;
-        const threadMsgs = threadKey
-          ? allItems.filter(e => e.gmail_thread_id === threadKey).sort((a, b) => new Date(a.received_at) - new Date(b.received_at))
-          : [updatedSelected];
+        const tId = updatedSelected.gmail_thread_id && updatedSelected.gmail_thread_id.trim();
+        const mId = updatedSelected.gmail_message_id && updatedSelected.gmail_message_id.trim();
+        const threadMsgs = allItems.filter(e => {
+          if (tId && e.gmail_thread_id && e.gmail_thread_id.trim() === tId) return true;
+          if (mId && (e.gmail_thread_id === mId || e.gmail_message_id === mId)) return true;
+          return e.id === updatedSelected.id;
+        }).sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
           
         return { ...updatedSelected, threadMessages: threadMsgs.length > 0 ? threadMsgs : [updatedSelected] };
       });

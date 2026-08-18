@@ -67,17 +67,30 @@ def get_emails(
             (Email.gmail_thread_id.in_(matching_thread_ids))
         )
     else:
-        filtered_query = base_query
+        # Determine matching thread_ids and individual message IDs based on folder / flags
+        folder_match_query = base_query
         if folder == "unread":
-            filtered_query = filtered_query.filter(Email.is_read == False)
+            folder_match_query = folder_match_query.filter(Email.is_read == False)
         elif folder == "starred":
-            filtered_query = filtered_query.filter(Email.is_starred == True)
+            folder_match_query = folder_match_query.filter(Email.is_starred == True)
         elif folder in ["follow_up", "replied", "snoozed"]:
-            filtered_query = filtered_query.filter(Email.folder_status == folder)
+            folder_match_query = folder_match_query.filter(Email.folder_status == folder)
         elif folder == "inbox":
-            filtered_query = filtered_query.filter(
+            folder_match_query = folder_match_query.filter(
                 (Email.folder_status == "inbox") | (Email.folder_status == "replied")
             )
+
+        matching_thread_rows = folder_match_query.with_entities(Email.gmail_thread_id, Email.id).all()
+        matching_thread_ids = list(set(r[0] for r in matching_thread_rows if r[0]))
+        matching_email_ids = list(set(r[1] for r in matching_thread_rows if not r[0]))
+
+        if matching_thread_ids or matching_email_ids:
+            filtered_query = base_query.filter(
+                (Email.gmail_thread_id.in_(matching_thread_ids)) |
+                (Email.id.in_(matching_email_ids))
+            )
+        else:
+            filtered_query = base_query.filter(Email.id == -1)
 
     total_count = filtered_query.count()
     results = filtered_query.order_by(desc(Email.received_at)).offset(offset).limit(limit).all()

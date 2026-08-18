@@ -380,7 +380,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                     continue
 
                 msg_detail = detail_resp.json()
-                thread_id = msg_detail.get("threadId", msg_id)
+                thread_id = msg_detail.get("threadId") or msg_id
                 payload = msg_detail.get("payload", {})
                 msg_headers = payload.get("headers", [])
 

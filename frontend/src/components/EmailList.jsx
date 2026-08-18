@@ -17,7 +17,9 @@ export default function EmailList({
     const threadMap = new Map();
     
     emails.forEach(email => {
-      const threadKey = email.gmail_thread_id || `single_${email.id}`;
+      const rawThreadId = email.gmail_thread_id && email.gmail_thread_id.trim() ? email.gmail_thread_id.trim() : null;
+      const rawMsgId = email.gmail_message_id && email.gmail_message_id.trim() ? email.gmail_message_id.trim() : null;
+      const threadKey = rawThreadId || rawMsgId || `single_${email.id}`;
       if (!threadMap.has(threadKey)) {
         threadMap.set(threadKey, []);
       }
