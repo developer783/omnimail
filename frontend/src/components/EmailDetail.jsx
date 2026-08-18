@@ -20,6 +20,8 @@ import {
   Strikethrough,
   List,
   ListOrdered,
+  Indent,
+  Outdent,
   AlignLeft,
   AlignCenter,
   AlignRight,
@@ -40,6 +42,161 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { api } from '../api';
+
+function ThreadMessageItem({ msg }) {
+  const iframeRef = useRef(null);
+  const [iframeHeight, setIframeHeight] = useState('350px');
+
+  const updateIframeHeight = () => {
+    try {
+      if (!iframeRef.current) return;
+      const iframe = iframeRef.current;
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) return;
+
+      const body = doc.body;
+      const html = doc.documentElement;
+      
+      const computedHeight = Math.max(
+        body ? body.scrollHeight : 0,
+        body ? body.offsetHeight : 0,
+        html ? html.clientHeight : 0,
+        html ? html.scrollHeight : 0,
+        html ? html.offsetHeight : 0
+      );
+
+      if (computedHeight > 0) {
+        setIframeHeight(`${computedHeight + 24}px`);
+      }
+    } catch (err) {}
+  };
+
+  const handleIframeLoad = () => {
+    updateIframeHeight();
+    try {
+      if (!iframeRef.current) return;
+      const iframe = iframeRef.current;
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) return;
+
+      if (doc.body && typeof ResizeObserver !== 'undefined') {
+        const resizeObserver = new ResizeObserver(() => updateIframeHeight());
+        resizeObserver.observe(doc.body);
+      }
+
+      const imgs = doc.getElementsByTagName('img');
+      for (let i = 0; i < imgs.length; i++) {
+        if (!imgs[i].complete) {
+          imgs[i].addEventListener('load', updateIframeHeight);
+          imgs[i].addEventListener('error', updateIframeHeight);
+        }
+      }
+    } catch (err) {}
+  };
+
+  useEffect(() => {
+    setIframeHeight('350px');
+    const timer = setTimeout(() => updateIframeHeight(), 150);
+    return () => clearTimeout(timer);
+  }, [msg.id, msg.html_body]);
+
+  const senderInitial = (msg.sender || 'U').replace(/<.*>/, '').trim().charAt(0).toUpperCase() || 'U';
+  
+  let formattedDate = msg.received_at;
+  try {
+    let dateStr = msg.received_at;
+    if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+')) {
+      dateStr = dateStr + 'Z';
+    }
+    formattedDate = format(new Date(dateStr), 'EEEE, MMMM d, yyyy @ h:mm a');
+  } catch (e) {}
+
+  const isSentByMe = msg.sender.toLowerCase().includes('me <') || msg.sender.startsWith('Me ');
+
+  return (
+    <div style={{
+      border: '1px solid #e2e8f0',
+      borderRadius: '12px',
+      marginBottom: '16px',
+      background: '#ffffff',
+      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+      overflow: 'hidden'
+    }}>
+      <div style={{
+        padding: '12px 20px',
+        background: isSentByMe ? '#eef2ff' : '#f8fafc',
+        borderBottom: '1px solid #e2e8f0',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div
+            className="sender-avatar-md"
+            style={isSentByMe ? { background: 'linear-gradient(135deg, #6366f1, #4f46e5)' } : {}}
+          >
+            {senderInitial}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{msg.sender}</span>
+              {isSentByMe && (
+                <span style={{ fontSize: '11px', fontWeight: 700, background: '#4f46e5', color: 'white', padding: '1px 6px', borderRadius: '4px' }}>
+                  Sent Reply
+                </span>
+              )}
+            </div>
+            <span style={{ fontSize: '11.5px', color: '#64748b' }}>To: {msg.recipient || 'Me'}</span>
+          </div>
+        </div>
+
+        <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Calendar size={14} />
+          <span>{formattedDate}</span>
+        </div>
+      </div>
+
+      <div className="iframe-container" style={{ padding: '8px 0', minHeight: '150px' }}>
+        <iframe
+          ref={iframeRef}
+          title={`Email Message ${msg.id}`}
+          className="email-iframe"
+          srcDoc={msg.html_body}
+          onLoad={handleIframeLoad}
+          style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
+          sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+        />
+      </div>
+
+      {msg.attachments && msg.attachments.length > 0 && (
+        <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+            <Paperclip size={14} color="#4f46e5" />
+            <span>Attachments ({msg.attachments.length})</span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {msg.attachments.map((att) => (
+              <div
+                key={att.id}
+                onClick={async () => {
+                  try {
+                    await api.downloadAttachment(msg.id, att.id, att.filename);
+                  } catch (err) {
+                    alert('Download failed: ' + err.message);
+                  }
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+              >
+                <Paperclip size={14} color="#6366f1" />
+                <span>{att.filename}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function EmailDetail({
   email,
@@ -74,6 +231,62 @@ export default function EmailDetail({
   const editorRef = useRef(null);
   const fileInputRef = useRef(null);
   const photoInputRef = useRef(null);
+  const iframeRef = useRef(null);
+  const [iframeHeight, setIframeHeight] = useState('600px');
+
+  const updateIframeHeight = () => {
+    try {
+      if (!iframeRef.current) return;
+      const iframe = iframeRef.current;
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) return;
+
+      const body = doc.body;
+      const html = doc.documentElement;
+      
+      const computedHeight = Math.max(
+        body ? body.scrollHeight : 0,
+        body ? body.offsetHeight : 0,
+        html ? html.clientHeight : 0,
+        html ? html.scrollHeight : 0,
+        html ? html.offsetHeight : 0
+      );
+
+      if (computedHeight > 0) {
+        setIframeHeight(`${computedHeight + 24}px`);
+      }
+    } catch (err) {
+      // Silent fallback
+    }
+  };
+
+  const handleIframeLoad = () => {
+    updateIframeHeight();
+    
+    try {
+      if (!iframeRef.current) return;
+      const iframe = iframeRef.current;
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) return;
+
+      if (doc.body && typeof ResizeObserver !== 'undefined') {
+        const resizeObserver = new ResizeObserver(() => {
+          updateIframeHeight();
+        });
+        resizeObserver.observe(doc.body);
+      }
+
+      const imgs = doc.getElementsByTagName('img');
+      for (let i = 0; i < imgs.length; i++) {
+        if (!imgs[i].complete) {
+          imgs[i].addEventListener('load', updateIframeHeight);
+          imgs[i].addEventListener('error', updateIframeHeight);
+        }
+      }
+    } catch (err) {
+      // Silent fallback
+    }
+  };
 
   // Reset composer state whenever the selected email ID changes
   useEffect(() => {
@@ -86,6 +299,12 @@ export default function EmailDetail({
     setAttachments([]);
     setErrorMsg('');
     setIsPopout(false);
+    setIframeHeight('600px');
+
+    const timer = setTimeout(() => {
+      updateIframeHeight();
+    }, 150);
+    return () => clearTimeout(timer);
   }, [email?.id]);
 
   // Auto-save draft to localStorage every 3 seconds
@@ -347,6 +566,10 @@ export default function EmailDetail({
 
   const popularEmojis = ['😊', '👍', '❤️', '🎉', '🔥', '🚀', '🙏', '💡', '✅', '👏'];
 
+  const messagesToRender = (email.threadMessages && email.threadMessages.length > 0)
+    ? email.threadMessages
+    : [email];
+
   return (
     <div className="email-detail-pane">
       {/* Thread Action Header */}
@@ -423,15 +646,10 @@ export default function EmailDetail({
 
         <div className="email-meta-row">
           <div className="email-meta-left">
-            <div className="sender-avatar-md">{senderInitial}</div>
-            <div className="sender-details">
-              <span className="sender-name">{email.sender}</span>
-              <span className="account-source">
-                Received via <strong>{email.account_email}</strong>
-              </span>
-            </div>
+            <span className="account-source">
+              Thread in <strong>{email.account_email}</strong> ({messagesToRender.length} message{messagesToRender.length === 1 ? '' : 's'})
+            </span>
           </div>
-
           <div className="email-meta-right">
             <Calendar size={14} />
             <span>{formattedDate}</span>
@@ -439,61 +657,13 @@ export default function EmailDetail({
         </div>
       </div>
 
-      {/* Original Raw HTML Sandboxed Iframe */}
-      <div className="iframe-container">
-        <iframe
-          title="Email Content Sandbox"
-          className="email-iframe"
-          srcDoc={email.html_body}
-          sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-        />
+      {/* Render all messages in the conversation thread chronologically */}
+      <div style={{ flex: 1, padding: '20px 24px', overflowY: 'auto', background: '#f8fafc' }}>
+        {messagesToRender.map((msg) => (
+          <ThreadMessageItem key={msg.id} msg={msg} />
+        ))}
       </div>
 
-      {/* Received Email Attachments Section */}
-      {email.attachments && email.attachments.length > 0 && (
-        <div style={{ padding: '16px 24px', background: '#f8fafc', borderTop: '1px solid var(--border-color)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '13px', fontWeight: 700, color: '#334155' }}>
-            <Paperclip size={16} color="#4f46e5" />
-            <span>Attachments ({email.attachments.length})</span>
-          </div>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-            {email.attachments.map((att) => (
-              <div
-                key={att.id}
-                onClick={async () => {
-                  try {
-                    await api.downloadAttachment(email.id, att.id, att.filename);
-                  } catch (err) {
-                    alert('Download failed: ' + err.message);
-                  }
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '10px 14px',
-                  background: '#ffffff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '10px',
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.03)',
-                  transition: 'all 0.15s ease'
-                }}
-                title={`Click to download ${att.filename}`}
-              >
-                <Paperclip size={18} color="#6366f1" />
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>{att.filename}</span>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    {att.size_bytes > 0 ? (att.size_bytes / 1024).toFixed(1) + ' KB' : att.mime_type}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Inline Reply / Forward Controls Section */}
       <div style={{ borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '16px 24px' }}>
@@ -533,6 +703,7 @@ export default function EmailDetail({
               bottom: '20px',
               right: '30px',
               width: '640px',
+              maxHeight: 'calc(100vh - 60px)',
               height: '560px',
               zIndex: 9999,
               border: '1px solid var(--border-color)',
@@ -546,6 +717,9 @@ export default function EmailDetail({
               border: '1px solid var(--border-color)',
               borderRadius: '12px',
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
+              maxHeight: 'calc(100vh - 180px)',
+              display: 'flex',
+              flexDirection: 'column',
               overflow: 'hidden',
               background: '#ffffff'
             }}
@@ -553,6 +727,7 @@ export default function EmailDetail({
             {/* Composer Header */}
             <div
               style={{
+                flexShrink: 0,
                 padding: '10px 16px',
                 background: '#f8fafc',
                 borderBottom: '1px solid var(--border-color)',
@@ -590,7 +765,7 @@ export default function EmailDetail({
             </div>
 
             {/* Recipient Fields */}
-            <div style={{ padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: '1px solid var(--border-color)' }}>
+            <div style={{ flexShrink: 0, padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: '1px solid var(--border-color)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', width: '36px' }}>To:</span>
                 <input
@@ -658,67 +833,70 @@ export default function EmailDetail({
 
             {/* Error banner if any */}
             {errorMsg && (
-              <div style={{ padding: '8px 16px', background: '#fef2f2', color: '#dc2626', fontSize: '13px', borderBottom: '1px solid #fecaca' }}>
+              <div style={{ flexShrink: 0, padding: '8px 16px', background: '#fef2f2', color: '#dc2626', fontSize: '13px', borderBottom: '1px solid #fecaca' }}>
                 {errorMsg}
               </div>
             )}
 
-            {/* Rich Text Editor Body */}
-            <div
-              ref={editorRef}
-              contentEditable={!isPlainTextMode}
-              style={{
-                flex: isPopout ? 1 : 'none',
-                minHeight: isPopout ? '220px' : '130px',
-                maxHeight: isPopout ? '320px' : '220px',
-                overflowY: 'auto',
-                padding: '12px 16px',
-                outline: 'none',
-                fontSize: '14px',
-                lineHeight: 1.5,
-                color: '#0f172a',
-                fontFamily: isPlainTextMode ? 'monospace' : 'inherit'
-              }}
-              onInput={(e) => setBodyText(e.currentTarget.innerHTML)}
-            />
-
-            {/* Attached files preview */}
-            {attachments.length > 0 && (
-              <div style={{ padding: '8px 16px', display: 'flex', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid var(--border-color)', background: '#f8fafc' }}>
-                {attachments.map((att, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px' }}>
-                    <Paperclip size={12} color="#4f46e5" />
-                    <span>{att.name} ({att.size})</span>
-                    <button onClick={() => handleRemoveAttachment(i)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444' }}>
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Collapsible Quoted Original Message (Gmail "···" style) */}
-            <div style={{ borderTop: '1px solid var(--border-color)', background: '#f8fafc' }}>
+            {/* Scrollable Middle Content Container (Editor + Attachments + Quoted History) */}
+            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {/* Rich Text Editor Body */}
               <div
-                onClick={() => setIsQuotedCollapsed(!isQuotedCollapsed)}
-                style={{ padding: '8px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: '#64748b', fontWeight: 600 }}
-              >
-                <span>On {formattedDate}, {email.sender} wrote:</span>
-                {isQuotedCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-              </div>
+                ref={editorRef}
+                contentEditable={!isPlainTextMode}
+                style={{
+                  flex: 1,
+                  minHeight: '120px',
+                  padding: '12px 16px',
+                  outline: 'none',
+                  fontSize: '14px',
+                  lineHeight: 1.5,
+                  color: '#0f172a',
+                  fontFamily: isPlainTextMode ? 'monospace' : 'inherit'
+                }}
+                onInput={(e) => setBodyText(e.currentTarget.innerHTML)}
+              />
 
-              {!isQuotedCollapsed && (
-                <div style={{ padding: '12px 16px', fontSize: '12px', color: '#475569', borderTop: '1px solid var(--border-color)', maxHeight: '140px', overflowY: 'auto' }}>
-                  <div dangerouslySetInnerHTML={{ __html: email.html_body }} />
+              {/* Attached files preview */}
+              {attachments.length > 0 && (
+                <div style={{ flexShrink: 0, padding: '8px 16px', display: 'flex', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid var(--border-color)', background: '#f8fafc' }}>
+                  {attachments.map((att, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '12px' }}>
+                      <Paperclip size={12} color="#4f46e5" />
+                      <span>{att.name} ({att.size})</span>
+                      <button onClick={() => handleRemoveAttachment(i)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#ef4444' }}>
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
+
+              {/* Collapsible Quoted Original Message (Gmail "···" style) */}
+              <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', background: '#f8fafc' }}>
+                <div
+                  onClick={() => setIsQuotedCollapsed(!isQuotedCollapsed)}
+                  style={{ padding: '8px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: '#64748b', fontWeight: 600 }}
+                >
+                  <span>On {formattedDate}, {email.sender} wrote:</span>
+                  {isQuotedCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                </div>
+
+                {!isQuotedCollapsed && (
+                  <div style={{ padding: '12px 16px', fontSize: '12px', color: '#475569', borderTop: '1px solid var(--border-color)', maxHeight: '160px', overflowY: 'auto' }}>
+                    <div dangerouslySetInnerHTML={{ __html: email.html_body }} />
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Expanded Formatting Toolbar ("A" toggle) */}
-            {showFormatToolbar && (
-              <div style={{ padding: '6px 16px', background: '#f8fafc', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
-                {/* Font Family Dropdown */}
-                <select
+            {/* Pinned Bottom Toolbars */}
+            <div style={{ flexShrink: 0 }}>
+              {/* Expanded Formatting Toolbar ("A" toggle) */}
+              {showFormatToolbar && (
+                <div style={{ padding: '6px 16px', background: '#f8fafc', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                  {/* Font Family Dropdown */}
+                  <select
                   onChange={(e) => applyFormat('fontName', e.target.value)}
                   style={{ padding: '3px 6px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '12px', outline: 'none' }}
                 >
@@ -798,6 +976,12 @@ export default function EmailDetail({
                 </button>
                 <button className="btn-icon" onClick={() => applyFormat('insertOrderedList')} title="Numbered List">
                   <ListOrdered size={14} />
+                </button>
+                <button className="btn-icon" onClick={() => applyFormat('outdent')} title="Indent Left">
+                  <Outdent size={14} />
+                </button>
+                <button className="btn-icon" onClick={() => applyFormat('indent')} title="Indent Right">
+                  <Indent size={14} />
                 </button>
                 <button className="btn-icon" onClick={() => applyFormat('formatBlock', 'blockquote')} title="Quote">
                   <Quote size={14} />
@@ -931,6 +1115,7 @@ export default function EmailDetail({
               <button className="btn-icon" onClick={handlePromptDiscard} title="Discard draft">
                 <Trash2 size={16} color="#ef4444" />
               </button>
+            </div>
             </div>
           </div>
         )}

@@ -68,8 +68,16 @@ export default function App() {
       // Keep selected email updated without depending on selectedEmail state
       setSelectedEmail(prevSelected => {
         if (!prevSelected) return null;
-        const updatedSelected = (response.items || []).find(e => e.id === prevSelected.id);
-        return updatedSelected || prevSelected;
+        const allItems = response.items || [];
+        const updatedSelected = allItems.find(e => e.id === prevSelected.id);
+        if (!updatedSelected) return prevSelected;
+        
+        const threadKey = updatedSelected.gmail_thread_id;
+        const threadMsgs = threadKey
+          ? allItems.filter(e => e.gmail_thread_id === threadKey).sort((a, b) => new Date(a.received_at) - new Date(b.received_at))
+          : [updatedSelected];
+          
+        return { ...updatedSelected, threadMessages: threadMsgs.length > 0 ? threadMsgs : [updatedSelected] };
       });
     } catch (err) {
       console.error('Error loading dashboard data:', err);
@@ -317,8 +325,8 @@ export default function App() {
         <EmailList
           emails={emails}
           selectedEmailId={selectedEmail ? selectedEmail.id : null}
-          onSelectEmail={(email) => {
-            setSelectedEmail(email);
+          onSelectEmail={(email, threadMsgs) => {
+            setSelectedEmail({ ...email, threadMessages: threadMsgs || [email] });
             if (!email.is_read) {
               handleToggleRead(email);
             }

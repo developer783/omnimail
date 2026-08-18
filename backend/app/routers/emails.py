@@ -46,25 +46,38 @@ def get_emails(
     if account_id:
         base_query = base_query.filter(Email.account_id == account_id)
 
-    # Apply folder filter
-    filtered_query = base_query
-    if folder == "unread":
-        filtered_query = filtered_query.filter(Email.is_read == False)
-    elif folder == "starred":
-        filtered_query = filtered_query.filter(Email.is_starred == True)
-    elif folder in ["follow_up", "replied", "snoozed"]:
-        filtered_query = filtered_query.filter(Email.folder_status == folder)
-    elif folder == "inbox":
-        filtered_query = filtered_query.filter(Email.folder_status == "inbox")
-
-    # Apply global search if present
+    # Apply global search if present, else apply folder filter
     if q and q.strip():
         search_pattern = f"%{q.strip()}%"
-        filtered_query = filtered_query.filter(
-            (Email.subject.ilike(search_pattern)) | 
-            (Email.sender.ilike(search_pattern)) | 
+        # Find all thread_ids that match search terms
+        matching_threads = db.query(Email.gmail_thread_id).filter(
+            (Email.subject.ilike(search_pattern)) |
+            (Email.sender.ilike(search_pattern)) |
+            (Email.recipient.ilike(search_pattern)) |
             (Email.html_body.ilike(search_pattern))
+        ).distinct().all()
+
+        matching_thread_ids = [t[0] for t in matching_threads if t[0]]
+
+        filtered_query = base_query.filter(
+            (Email.subject.ilike(search_pattern)) |
+            (Email.sender.ilike(search_pattern)) |
+            (Email.recipient.ilike(search_pattern)) |
+            (Email.html_body.ilike(search_pattern)) |
+            (Email.gmail_thread_id.in_(matching_thread_ids))
         )
+    else:
+        filtered_query = base_query
+        if folder == "unread":
+            filtered_query = filtered_query.filter(Email.is_read == False)
+        elif folder == "starred":
+            filtered_query = filtered_query.filter(Email.is_starred == True)
+        elif folder in ["follow_up", "replied", "snoozed"]:
+            filtered_query = filtered_query.filter(Email.folder_status == folder)
+        elif folder == "inbox":
+            filtered_query = filtered_query.filter(
+                (Email.folder_status == "inbox") | (Email.folder_status == "replied")
+            )
 
     total_count = filtered_query.count()
     results = filtered_query.order_by(desc(Email.received_at)).offset(offset).limit(limit).all()
@@ -258,12 +271,15 @@ def reply_to_email(
     )
 
     sent_gmail_id = sent_result.get("id", f"sent_{int(datetime.datetime.utcnow().timestamp())}")
-    sent_thread_id = sent_result.get("threadId", email_obj.gmail_thread_id)
+    target_thread_id = sent_result.get("threadId") or email_obj.gmail_thread_id or email_obj.gmail_message_id
+
+    if not email_obj.gmail_thread_id or email_obj.gmail_thread_id != target_thread_id:
+        email_obj.gmail_thread_id = target_thread_id
 
     sent_email_record = Email(
         account_id=account.id,
         gmail_message_id=sent_gmail_id,
-        gmail_thread_id=sent_thread_id,
+        gmail_thread_id=target_thread_id,
         message_id_header=f"<{sent_gmail_id}@mail.gmail.com>",
         sender=f"Me <{account.google_email}>",
         recipient=to_recipient,

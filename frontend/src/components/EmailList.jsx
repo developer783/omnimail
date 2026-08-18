@@ -11,6 +11,64 @@ export default function EmailList({
   onToggleStar,
   onToggleRead
 }) {
+  const groupedThreads = React.useMemo(() => {
+    if (!emails || emails.length === 0) return [];
+    
+    const threadMap = new Map();
+    
+    emails.forEach(email => {
+      const threadKey = email.gmail_thread_id || `single_${email.id}`;
+      if (!threadMap.has(threadKey)) {
+        threadMap.set(threadKey, []);
+      }
+      threadMap.get(threadKey).push(email);
+    });
+    
+    const threads = [];
+    threadMap.forEach((msgList, threadKey) => {
+      // Sort messages chronologically (oldest first, newest last)
+      msgList.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
+      
+      const firstMsg = msgList[0];
+      const latestMsg = msgList[msgList.length - 1];
+      
+      const participantNames = [];
+      msgList.forEach(m => {
+        let name = (m.sender || 'Unknown').replace(/<.*>/, '').trim();
+        if (m.sender.toLowerCase().includes('me <') || m.sender.startsWith('Me ')) {
+          name = 'Me';
+        }
+        if (name && !participantNames.includes(name)) {
+          participantNames.push(name);
+        }
+      });
+      
+      const isUnread = msgList.some(m => !m.is_read);
+      const isStarred = msgList.some(m => m.is_starred);
+      const hasReplied = msgList.some(m => m.folder_status === 'replied' || m.sender.startsWith('Me '));
+
+      threads.push({
+        threadId: threadKey,
+        messages: msgList,
+        latestMessage: latestMsg,
+        firstMessage: firstMsg,
+        subject: firstMsg.subject || latestMsg.subject || '(No Subject)',
+        participantNames,
+        sendersDisplay: participantNames.join(', '),
+        messageCount: msgList.length,
+        isUnread,
+        isStarred,
+        hasReplied,
+        receivedAt: latestMsg.received_at,
+        accountEmail: latestMsg.account_email
+      });
+    });
+    
+    // Sort threads by latest message timestamp descending
+    threads.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+    return threads;
+  }, [emails]);
+
   const formatDateInfo = (dateString) => {
     try {
       let dateStr = dateString;
@@ -37,10 +95,10 @@ export default function EmailList({
 
   const getFolderTitle = () => {
     switch (activeFolder) {
-      case 'unread': return 'Unread Messages (Last 24h)';
+      case 'unread': return 'Unread Threads (Last 24h)';
       case 'starred': return 'Starred Threads';
       case 'follow_up': return 'Follow Up Needed';
-      case 'replied': return 'Replied Emails';
+      case 'replied': return 'Replied Threads';
       case 'snoozed': return 'Snoozed Messages';
       default: return 'Inbox Threads (Last 24h)';
     }
@@ -58,7 +116,7 @@ export default function EmailList({
         <div className="inbox-title-row">
           <div className="inbox-title">{getFolderTitle()}</div>
           <span className="inbox-count-badge">
-            {emails.length} thread{emails.length === 1 ? '' : 's'}
+            {groupedThreads.length} thread{groupedThreads.length === 1 ? '' : 's'}
           </span>
         </div>
 
@@ -70,7 +128,7 @@ export default function EmailList({
       </div>
 
       <div className="email-list">
-        {emails.length === 0 ? (
+        {groupedThreads.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">
               <Mail size={28} />
@@ -85,39 +143,53 @@ export default function EmailList({
             </div>
           </div>
         ) : (
-          emails.map((email) => {
-            const isSelected = selectedEmailId === email.id;
-            const isUnread = !email.is_read;
-            const dateInfo = formatDateInfo(email.received_at);
+          groupedThreads.map((thread) => {
+            const isSelected = thread.messages.some(m => m.id === selectedEmailId);
+            const isUnread = thread.isUnread;
+            const dateInfo = formatDateInfo(thread.receivedAt);
+            const targetMsgForSelection = thread.latestMessage;
 
             return (
               <div
-                key={email.id}
+                key={thread.threadId}
                 className={`email-card ${isSelected ? 'selected' : ''} ${isUnread ? 'unread-card' : ''}`}
-                onClick={() => onSelectEmail(email)}
+                onClick={() => onSelectEmail(targetMsgForSelection, thread.messages)}
               >
                 <div className="email-card-top">
                   <div className="sender-row">
                     {isUnread && <span className="unread-dot" title="Unread" />}
-                    <span className={`email-sender ${isUnread ? 'bold-text' : ''}`} title={email.sender}>
-                      {email.sender}
+                    <span className={`email-sender ${isUnread ? 'bold-text' : ''}`} title={thread.sendersDisplay}>
+                      {thread.sendersDisplay}
                     </span>
+                    {thread.messageCount > 1 && (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: '#4f46e5',
+                        background: '#e0e7ff',
+                        padding: '1px 6px',
+                        borderRadius: '99px',
+                        marginLeft: '4px'
+                      }}>
+                        {thread.messageCount}
+                      </span>
+                    )}
                   </div>
                   <span className="email-time">{dateInfo.formattedStr}</span>
                 </div>
 
-                <div className={`email-subject ${isUnread ? 'bold-text' : ''}`} title={email.subject}>
-                  {email.subject || '(No Subject)'}
+                <div className={`email-subject ${isUnread ? 'bold-text' : ''}`} title={thread.subject}>
+                  {thread.subject}
                 </div>
 
                 <div className="email-card-bottom">
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span className="account-tag" title={`Belongs to ${email.account_email}`}>
-                      {email.account_email}
+                    <span className="account-tag" title={`Belongs to ${thread.accountEmail}`}>
+                      {thread.accountEmail}
                     </span>
 
                     {/* Expiring Soon Badge (over 20h old) */}
-                    {dateInfo.isExpiringSoon && email.folder_status !== 'replied' && (
+                    {dateInfo.isExpiringSoon && !thread.hasReplied && (
                       <span
                         style={{
                           display: 'inline-flex',
@@ -142,17 +214,17 @@ export default function EmailList({
                     <button
                       className="btn-star"
                       title="View in Gmail"
-                      onClick={(e) => openGmailDeepLink(email, e)}
+                      onClick={(e) => openGmailDeepLink(thread.latestMessage, e)}
                     >
                       <ExternalLink size={14} color="var(--text-muted)" />
                     </button>
 
                     <button
-                      className={`btn-star ${email.is_starred ? 'starred' : ''}`}
-                      title={email.is_starred ? 'Unstar' : 'Star'}
-                      onClick={() => onToggleStar(email)}
+                      className={`btn-star ${thread.isStarred ? 'starred' : ''}`}
+                      title={thread.isStarred ? 'Unstar' : 'Star'}
+                      onClick={() => onToggleStar(thread.latestMessage)}
                     >
-                      <Star size={14} fill={email.is_starred ? '#f59e0b' : 'none'} color={email.is_starred ? '#f59e0b' : 'var(--text-muted)'} />
+                      <Star size={14} fill={thread.isStarred ? '#f59e0b' : 'none'} color={thread.isStarred ? '#f59e0b' : 'var(--text-muted)'} />
                     </button>
                   </div>
                 </div>
