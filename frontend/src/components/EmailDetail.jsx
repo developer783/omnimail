@@ -662,7 +662,7 @@ export default function EmailDetail({
       </div>
 
       {/* Render all messages in the conversation thread chronologically */}
-      <div style={{ flex: 1, padding: '20px 24px', overflowY: 'auto', background: '#f8fafc' }}>
+      <div style={{ flex: '1 1 0%', minHeight: 0, overflowY: 'auto', background: '#f8fafc', padding: '20px 24px' }}>
         {messagesToRender.map((msg) => (
           <ThreadMessageItem key={msg.id} msg={msg} />
         ))}
@@ -670,7 +670,7 @@ export default function EmailDetail({
 
 
       {/* Inline Reply / Forward Controls Section */}
-      <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '12px 24px' }}>
+      <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '12px 24px', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {!composerMode ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
@@ -721,7 +721,8 @@ export default function EmailDetail({
               border: '1px solid var(--border-color)',
               borderRadius: '12px',
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-              maxHeight: 'calc(100vh - 280px)',
+              maxHeight: 'calc(100vh - 260px)',
+              minHeight: '200px',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
@@ -843,14 +844,14 @@ export default function EmailDetail({
             )}
 
             {/* Scrollable Middle Content Container (Editor + Attachments + Quoted History) */}
-            <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: '1 1 0%', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
               {/* Rich Text Editor Body */}
               <div
                 ref={editorRef}
                 contentEditable={!isPlainTextMode}
                 style={{
-                  flex: 1,
-                  minHeight: '120px',
+                  flex: '1 1 0%',
+                  minHeight: '60px',
                   padding: '12px 16px',
                   outline: 'none',
                   fontSize: '14px',
@@ -895,7 +896,7 @@ export default function EmailDetail({
             </div>
 
             {/* Combined Pinned Bottom Toolbars Block (Formatting Row + Actions Row) */}
-            <div style={{ flexShrink: 0, position: 'sticky', bottom: 0, zIndex: 10, background: '#ffffff' }}>
+            <div style={{ flexShrink: 0, background: '#ffffff', borderTop: '1px solid var(--border-color)' }}>
               {/* Expanded Formatting Toolbar ("A" toggle) */}
               {showFormatToolbar && (
                 <div style={{ padding: '6px 16px', background: '#f8fafc', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
