@@ -18,12 +18,16 @@ export default function EmailList({
     
     emails.forEach(email => {
       const rawThreadId = email.gmail_thread_id && email.gmail_thread_id.trim() ? email.gmail_thread_id.trim() : null;
-      const rawMsgId = email.gmail_message_id && email.gmail_message_id.trim() ? email.gmail_message_id.trim() : null;
-      const threadKey = rawThreadId || rawMsgId || `single_${email.id}`;
+      const cleanSubj = email.subject ? email.subject.replace(/^(re|fwd):\s*/i, '').trim().toLowerCase() : '';
+      
+      const threadKey = rawThreadId || (cleanSubj ? `subj_${email.account_id}_${cleanSubj}` : `single_${email.id}`);
       if (!threadMap.has(threadKey)) {
         threadMap.set(threadKey, []);
       }
-      threadMap.get(threadKey).push(email);
+      const list = threadMap.get(threadKey);
+      if (!list.some(existing => existing.id === email.id)) {
+        list.push(email);
+      }
     });
     
     const threads = [];

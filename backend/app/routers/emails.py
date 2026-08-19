@@ -119,17 +119,17 @@ def get_emails(
             )
         )
 
-    # Calculate Folder Counts across current context (or global)
+    # Calculate Folder Counts across current context (or global) by unique thread_id
     cnt_query = db.query(Email)
     if account_id:
         cnt_query = cnt_query.filter(Email.account_id == account_id)
 
-    inbox_cnt = cnt_query.filter(Email.folder_status == "inbox").count()
-    unread_cnt = cnt_query.filter(Email.is_read == False).count()
-    starred_cnt = cnt_query.filter(Email.is_starred == True).count()
-    follow_up_cnt = cnt_query.filter(Email.folder_status == "follow_up").count()
-    replied_cnt = cnt_query.filter(Email.folder_status == "replied").count()
-    snoozed_cnt = cnt_query.filter(Email.folder_status == "snoozed").count()
+    inbox_cnt = cnt_query.filter((Email.folder_status == "inbox") | (Email.folder_status == "replied")).with_entities(Email.gmail_thread_id).distinct().count()
+    unread_cnt = cnt_query.filter(Email.is_read == False).with_entities(Email.gmail_thread_id).distinct().count()
+    starred_cnt = cnt_query.filter(Email.is_starred == True).with_entities(Email.gmail_thread_id).distinct().count()
+    follow_up_cnt = cnt_query.filter(Email.folder_status == "follow_up").with_entities(Email.gmail_thread_id).distinct().count()
+    replied_cnt = cnt_query.filter(Email.folder_status == "replied").with_entities(Email.gmail_thread_id).distinct().count()
+    snoozed_cnt = cnt_query.filter(Email.folder_status == "snoozed").with_entities(Email.gmail_thread_id).distinct().count()
 
     folder_counts = FolderCounts(
         inbox=inbox_cnt,
@@ -285,7 +285,7 @@ def reply_to_email(
     )
 
     sent_gmail_id = sent_result.get("id", f"sent_{int(datetime.datetime.utcnow().timestamp())}")
-    target_thread_id = sent_result.get("threadId") or email_obj.gmail_thread_id or email_obj.gmail_message_id
+    target_thread_id = email_obj.gmail_thread_id or sent_result.get("threadId") or email_obj.gmail_message_id
 
     if not email_obj.gmail_thread_id or email_obj.gmail_thread_id != target_thread_id:
         email_obj.gmail_thread_id = target_thread_id
