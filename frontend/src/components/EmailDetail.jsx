@@ -111,7 +111,11 @@ function ThreadMessageItem({ msg }) {
     formattedDate = format(new Date(dateStr), 'EEEE, MMMM d, yyyy @ h:mm a');
   } catch (e) {}
 
-  const isSentByMe = msg.sender.toLowerCase().includes('me <') || msg.sender.startsWith('Me ');
+  const isSentByMe = msg.sender.toLowerCase().includes('me <') ||
+                     msg.sender.startsWith('Me ') ||
+                     (msg.account_email && msg.sender.toLowerCase().includes(msg.account_email.toLowerCase()));
+
+  const senderDisplayName = isSentByMe ? `Me <${msg.account_email || 'You'}>` : msg.sender;
 
   return (
     <div style={{
@@ -135,18 +139,18 @@ function ThreadMessageItem({ msg }) {
             className="sender-avatar-md"
             style={isSentByMe ? { background: 'linear-gradient(135deg, #6366f1, #4f46e5)' } : {}}
           >
-            {senderInitial}
+            {isSentByMe ? 'M' : senderInitial}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{msg.sender}</span>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{senderDisplayName}</span>
               {isSentByMe && (
                 <span style={{ fontSize: '11px', fontWeight: 700, background: '#4f46e5', color: 'white', padding: '1px 6px', borderRadius: '4px' }}>
                   Sent Reply
                 </span>
               )}
             </div>
-            <span style={{ fontSize: '11.5px', color: '#64748b' }}>To: {msg.recipient || 'Me'}</span>
+            <span style={{ fontSize: '11.5px', color: '#64748b' }}>To: {msg.recipient || (isSentByMe ? 'Recipient' : 'Me')}</span>
           </div>
         </div>
 

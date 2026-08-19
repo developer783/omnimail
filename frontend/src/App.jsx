@@ -79,8 +79,9 @@ export default function App() {
           if (mId && (e.gmail_thread_id === mId || e.gmail_message_id === mId)) return true;
           return e.id === updatedSelected.id;
         }).sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
-          
-        return { ...updatedSelected, threadMessages: threadMsgs.length > 0 ? threadMsgs : [updatedSelected] };
+
+        const combinedMsgs = threadMsgs.length > 0 ? threadMsgs : (prevSelected.threadMessages || [updatedSelected]);
+        return { ...updatedSelected, threadMessages: combinedMsgs };
       });
     } catch (err) {
       console.error('Error loading dashboard data:', err);

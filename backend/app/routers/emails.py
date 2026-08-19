@@ -33,17 +33,18 @@ def get_emails(
     Returns emails filtered by folder, account_id, and search query.
     Also returns global folder counts for the sidebar badges.
     """
-    base_query = db.query(Email, ConnectedAccount.google_email).join(
+    raw_base_query = db.query(Email, ConnectedAccount.google_email).join(
         ConnectedAccount, Email.account_id == ConnectedAccount.id
     )
 
     cutoff_24h = datetime.datetime.utcnow() - datetime.timedelta(hours=24)
-    # Enforce rolling 24-hour retention filter for inbound emails (preserve sent replies)
-    base_query = base_query.filter(
+    # Enforce rolling 24-hour retention filter for inbound emails (preserve sent replies and sent emails)
+    base_query = raw_base_query.filter(
         (Email.received_at >= cutoff_24h) | (Email.folder_status == "replied") | (Email.sender.ilike("Me %"))
     )
 
     if account_id:
+        raw_base_query = raw_base_query.filter(Email.account_id == account_id)
         base_query = base_query.filter(Email.account_id == account_id)
 
     # Apply global search if present, else apply folder filter
@@ -59,7 +60,7 @@ def get_emails(
 
         matching_thread_ids = [t[0] for t in matching_threads if t[0]]
 
-        filtered_query = base_query.filter(
+        filtered_query = raw_base_query.filter(
             (Email.subject.ilike(search_pattern)) |
             (Email.sender.ilike(search_pattern)) |
             (Email.recipient.ilike(search_pattern)) |
@@ -85,12 +86,12 @@ def get_emails(
         matching_email_ids = list(set(r[1] for r in matching_thread_rows if not r[0]))
 
         if matching_thread_ids or matching_email_ids:
-            filtered_query = base_query.filter(
+            filtered_query = raw_base_query.filter(
                 (Email.gmail_thread_id.in_(matching_thread_ids)) |
                 (Email.id.in_(matching_email_ids))
             )
         else:
-            filtered_query = base_query.filter(Email.id == -1)
+            filtered_query = raw_base_query.filter(Email.id == -1)
 
     total_count = filtered_query.count()
     results = filtered_query.order_by(desc(Email.received_at)).offset(offset).limit(limit).all()

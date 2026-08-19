@@ -37,7 +37,7 @@ export default function EmailList({
       const participantNames = [];
       msgList.forEach(m => {
         let name = (m.sender || 'Unknown').replace(/<.*>/, '').trim();
-        if (m.sender.toLowerCase().includes('me <') || m.sender.startsWith('Me ')) {
+        if (m.sender.toLowerCase().includes('me <') || m.sender.startsWith('Me ') || (m.account_email && m.sender.toLowerCase().includes(m.account_email.toLowerCase()))) {
           name = 'Me';
         }
         if (name && !participantNames.includes(name)) {
