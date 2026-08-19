@@ -721,7 +721,7 @@ export default function EmailDetail({
               border: '1px solid var(--border-color)',
               borderRadius: '12px',
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-              maxHeight: 'calc(100vh - 220px)',
+              maxHeight: 'calc(100vh - 280px)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
@@ -894,8 +894,8 @@ export default function EmailDetail({
               </div>
             </div>
 
-            {/* Pinned Bottom Toolbars */}
-            <div style={{ flexShrink: 0 }}>
+            {/* Combined Pinned Bottom Toolbars Block (Formatting Row + Actions Row) */}
+            <div style={{ flexShrink: 0, position: 'sticky', bottom: 0, zIndex: 10, background: '#ffffff' }}>
               {/* Expanded Formatting Toolbar ("A" toggle) */}
               {showFormatToolbar && (
                 <div style={{ padding: '6px 16px', background: '#f8fafc', borderTop: '1px solid var(--border-color)', borderBottom: '1px solid var(--border-color)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
