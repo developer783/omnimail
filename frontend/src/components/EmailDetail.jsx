@@ -670,7 +670,7 @@ export default function EmailDetail({
 
 
       {/* Inline Reply / Forward Controls Section */}
-      <div style={{ borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '16px 24px' }}>
+      <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '12px 24px' }}>
         {!composerMode ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
@@ -721,7 +721,7 @@ export default function EmailDetail({
               border: '1px solid var(--border-color)',
               borderRadius: '12px',
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-              maxHeight: 'calc(100vh - 180px)',
+              maxHeight: 'calc(100vh - 220px)',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',

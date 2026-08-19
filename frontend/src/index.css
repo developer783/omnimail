@@ -783,7 +783,7 @@ body {
   display: flex;
   flex-direction: column;
   background: #ffffff;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .email-detail-top-actions {
