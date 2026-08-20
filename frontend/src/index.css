@@ -1050,3 +1050,54 @@ body {
 @keyframes spin {
   100% { transform: rotate(360deg); }
 }
+
+/* ==========================================================================
+   INLINE COMPOSE BOX & VIEWPORT MAX-HEIGHT RULES
+   ========================================================================== */
+.inline-compose-wrapper {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-color);
+  background: #ffffff;
+  padding: 12px 24px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.compose-box-container {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+  max-height: calc(100vh - 290px);
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.compose-box-container.is-popout {
+  position: fixed;
+  bottom: 20px;
+  right: 30px;
+  width: 640px;
+  max-height: calc(100vh - 60px);
+  height: 560px;
+  z-index: 9999;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.compose-inner-scrollable {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+

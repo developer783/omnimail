@@ -670,7 +670,7 @@ export default function EmailDetail({
 
 
       {/* Inline Reply / Forward Controls Section */}
-      <div style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '12px 24px', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="inline-compose-wrapper" style={{ flexShrink: 0, borderTop: '1px solid var(--border-color)', background: '#ffffff', padding: '12px 24px', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {!composerMode ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button
@@ -702,6 +702,7 @@ export default function EmailDetail({
           </div>
         ) : (
           <div
+            className={`compose-box-container ${isPopout ? 'is-popout' : ''}`}
             style={isPopout ? {
               position: 'fixed',
               bottom: '20px',
@@ -721,8 +722,8 @@ export default function EmailDetail({
               border: '1px solid var(--border-color)',
               borderRadius: '12px',
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.06)',
-              maxHeight: 'calc(100vh - 260px)',
-              minHeight: '200px',
+              maxHeight: 'calc(100vh - 290px)',
+              minHeight: '180px',
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
@@ -844,7 +845,7 @@ export default function EmailDetail({
             )}
 
             {/* Scrollable Middle Content Container (Editor + Attachments + Quoted History) */}
-            <div style={{ flex: '1 1 0%', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div className="compose-inner-scrollable" style={{ flex: '1 1 0%', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
               {/* Rich Text Editor Body */}
               <div
                 ref={editorRef}
