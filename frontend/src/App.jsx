@@ -74,11 +74,21 @@ export default function App() {
         
         const tId = updatedSelected.gmail_thread_id && updatedSelected.gmail_thread_id.trim();
         const mId = updatedSelected.gmail_message_id && updatedSelected.gmail_message_id.trim();
-        const threadMsgs = allItems.filter(e => {
+        const rawThreadMsgs = allItems.filter(e => {
           if (tId && e.gmail_thread_id && e.gmail_thread_id.trim() === tId) return true;
           if (mId && (e.gmail_thread_id === mId || e.gmail_message_id === mId)) return true;
           return e.id === updatedSelected.id;
-        }).sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
+        });
+
+        const seenIds = new Set();
+        const threadMsgs = [];
+        rawThreadMsgs.forEach(m => {
+          if (!seenIds.has(m.id)) {
+            seenIds.add(m.id);
+            threadMsgs.push(m);
+          }
+        });
+        threadMsgs.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
 
         const combinedMsgs = threadMsgs.length > 0 ? threadMsgs : (prevSelected.threadMessages || [updatedSelected]);
         return { ...updatedSelected, threadMessages: combinedMsgs };

@@ -74,7 +74,11 @@ def get_emails(
             folder_match_query = folder_match_query.filter(Email.is_read == False)
         elif folder == "starred":
             folder_match_query = folder_match_query.filter(Email.is_starred == True)
-        elif folder in ["follow_up", "replied", "snoozed"]:
+        elif folder == "replied":
+            folder_match_query = folder_match_query.filter(
+                (Email.folder_status == "replied") | (Email.sender.ilike("Me %"))
+            )
+        elif folder in ["follow_up", "snoozed"]:
             folder_match_query = folder_match_query.filter(Email.folder_status == folder)
         elif folder == "inbox":
             folder_match_query = folder_match_query.filter(
@@ -128,7 +132,7 @@ def get_emails(
     unread_cnt = cnt_query.filter(Email.is_read == False).with_entities(Email.gmail_thread_id).distinct().count()
     starred_cnt = cnt_query.filter(Email.is_starred == True).with_entities(Email.gmail_thread_id).distinct().count()
     follow_up_cnt = cnt_query.filter(Email.folder_status == "follow_up").with_entities(Email.gmail_thread_id).distinct().count()
-    replied_cnt = cnt_query.filter(Email.folder_status == "replied").with_entities(Email.gmail_thread_id).distinct().count()
+    replied_cnt = cnt_query.filter((Email.folder_status == "replied") | (Email.sender.ilike("Me %"))).with_entities(Email.gmail_thread_id).distinct().count()
     snoozed_cnt = cnt_query.filter(Email.folder_status == "snoozed").with_entities(Email.gmail_thread_id).distinct().count()
 
     folder_counts = FolderCounts(
@@ -259,7 +263,16 @@ def reply_to_email(
 
     raw_subj = email_obj.subject or ""
     clean_subj = raw_subj if raw_subj.lower().startswith("re:") else f"Re: {raw_subj}"
-    to_recipient = email_obj.sender
+    
+    if reply_req.to and reply_req.to.strip():
+        to_recipient = reply_req.to.strip()
+    elif email_obj.sender and (email_obj.sender.startswith("Me ") or email_obj.sender.lower().startswith("me <")):
+        to_recipient = email_obj.recipient or account.google_email
+    else:
+        to_recipient = email_obj.sender or "Unknown Recipient"
+
+    if not to_recipient or to_recipient == "Unknown Recipient":
+        to_recipient = email_obj.recipient if email_obj.recipient else account.google_email
 
     msg = MIMEMultipart("alternative")
     msg["From"] = account.google_email

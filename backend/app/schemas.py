@@ -78,6 +78,7 @@ class EmailUpdate(BaseModel):
 
 class EmailReplyRequest(BaseModel):
     body_html: str
+    to: Optional[str] = None
     reply_all: bool = False
     cc: Optional[str] = None
     bcc: Optional[str] = None

@@ -43,9 +43,22 @@ import {
 import { format } from 'date-fns';
 import { api } from '../api';
 
-function ThreadMessageItem({ msg }) {
+function ThreadMessageItem({ msg, defaultExpanded = true }) {
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const iframeRef = useRef(null);
   const [iframeHeight, setIframeHeight] = useState('350px');
+
+  const bodySnippet = React.useMemo(() => {
+    if (!msg.html_body) return '';
+    try {
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = msg.html_body;
+      const text = tempDiv.textContent || tempDiv.innerText || '';
+      return text.replace(/\s+/g, ' ').trim().slice(0, 120);
+    } catch (e) {
+      return '';
+    }
+  }, [msg.html_body]);
 
   const updateIframeHeight = () => {
     try {
@@ -95,10 +108,12 @@ function ThreadMessageItem({ msg }) {
   };
 
   useEffect(() => {
-    setIframeHeight('350px');
-    const timer = setTimeout(() => updateIframeHeight(), 150);
-    return () => clearTimeout(timer);
-  }, [msg.id, msg.html_body]);
+    if (isExpanded) {
+      setIframeHeight('350px');
+      const timer = setTimeout(() => updateIframeHeight(), 150);
+      return () => clearTimeout(timer);
+    }
+  }, [isExpanded, msg.id, msg.html_body]);
 
   const senderInitial = (msg.sender || 'U').replace(/<.*>/, '').trim().charAt(0).toUpperCase() || 'U';
   
@@ -126,23 +141,28 @@ function ThreadMessageItem({ msg }) {
       boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
       overflow: 'hidden'
     }}>
-      <div style={{
-        padding: '12px 20px',
-        background: isSentByMe ? '#eef2ff' : '#f8fafc',
-        borderBottom: '1px solid #e2e8f0',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          padding: '12px 20px',
+          background: isSentByMe ? '#eef2ff' : '#f8fafc',
+          borderBottom: isExpanded ? '1px solid #e2e8f0' : 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          userSelect: 'none'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: '1 1 0%', minWidth: 0, paddingRight: '12px' }}>
           <div
             className="sender-avatar-md"
             style={isSentByMe ? { background: 'linear-gradient(135deg, #6366f1, #4f46e5)' } : {}}
           >
             {isSentByMe ? 'M' : senderInitial}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 0%', minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <span style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>{senderDisplayName}</span>
               {isSentByMe && (
                 <span style={{ fontSize: '11px', fontWeight: 700, background: '#4f46e5', color: 'white', padding: '1px 6px', borderRadius: '4px' }}>
@@ -150,53 +170,73 @@ function ThreadMessageItem({ msg }) {
                 </span>
               )}
             </div>
-            <span style={{ fontSize: '11.5px', color: '#64748b' }}>To: {msg.recipient || (isSentByMe ? 'Recipient' : 'Me')}</span>
+            {!isExpanded ? (
+              <span style={{ fontSize: '12px', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {bodySnippet || msg.subject}
+              </span>
+            ) : (
+              <span style={{ fontSize: '11.5px', color: '#64748b' }}>To: {msg.recipient || (isSentByMe ? 'Recipient' : 'Me')}</span>
+            )}
           </div>
         </div>
 
-        <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Calendar size={14} />
-          <span>{formattedDate}</span>
+        <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Calendar size={13} />
+            <span>{formattedDate}</span>
+          </div>
+          <button
+            className="btn-icon"
+            onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
+            title={isExpanded ? "Collapse message" : "Expand message"}
+            style={{ padding: '4px', borderRadius: '4px' }}
+          >
+            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          </button>
         </div>
       </div>
 
-      <div className="iframe-container" style={{ padding: '8px 0', minHeight: '150px' }}>
-        <iframe
-          ref={iframeRef}
-          title={`Email Message ${msg.id}`}
-          className="email-iframe"
-          srcDoc={msg.html_body}
-          onLoad={handleIframeLoad}
-          style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
-          sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-        />
-      </div>
-
-      {msg.attachments && msg.attachments.length > 0 && (
-        <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12px', fontWeight: 700, color: '#334155' }}>
-            <Paperclip size={14} color="#4f46e5" />
-            <span>Attachments ({msg.attachments.length})</span>
+      {isExpanded && (
+        <>
+          <div className="iframe-container" style={{ padding: '8px 0', minHeight: '150px' }}>
+            <iframe
+              ref={iframeRef}
+              title={`Email Message ${msg.id}`}
+              className="email-iframe"
+              srcDoc={msg.html_body}
+              onLoad={handleIframeLoad}
+              style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
+              sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+            />
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-            {msg.attachments.map((att) => (
-              <div
-                key={att.id}
-                onClick={async () => {
-                  try {
-                    await api.downloadAttachment(msg.id, att.id, att.filename);
-                  } catch (err) {
-                    alert('Download failed: ' + err.message);
-                  }
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
-              >
-                <Paperclip size={14} color="#6366f1" />
-                <span>{att.filename}</span>
+
+          {msg.attachments && msg.attachments.length > 0 && (
+            <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                <Paperclip size={14} color="#4f46e5" />
+                <span>Attachments ({msg.attachments.length})</span>
               </div>
-            ))}
-          </div>
-        </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {msg.attachments.map((att) => (
+                  <div
+                    key={att.id}
+                    onClick={async () => {
+                      try {
+                        await api.downloadAttachment(msg.id, att.id, att.filename);
+                      } catch (err) {
+                        alert('Download failed: ' + err.message);
+                      }
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 10px', background: '#ffffff', border: '1px solid #cbd5e1', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
+                  >
+                    <Paperclip size={14} color="#6366f1" />
+                    <span>{att.filename}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -546,6 +586,7 @@ export default function EmailDetail({
         });
       } else {
         await api.replyToEmail(email.id, {
+          to: toField.trim() || null,
           body_html: contentHtml,
           reply_all: composerMode === 'reply_all',
           cc: ccField.trim() || null,
@@ -570,9 +611,20 @@ export default function EmailDetail({
 
   const popularEmojis = ['😊', '👍', '❤️', '🎉', '🔥', '🚀', '🙏', '💡', '✅', '👏'];
 
-  const messagesToRender = (email.threadMessages && email.threadMessages.length > 0)
-    ? email.threadMessages
-    : [email];
+  const uniqueMessages = React.useMemo(() => {
+    const rawMsgs = (email.threadMessages && email.threadMessages.length > 0)
+      ? email.threadMessages
+      : [email];
+    const seen = new Set();
+    const result = [];
+    rawMsgs.forEach(m => {
+      if (m && m.id && !seen.has(m.id)) {
+        seen.add(m.id);
+        result.push(m);
+      }
+    });
+    return result.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
+  }, [email]);
 
   return (
     <div className="email-detail-pane">
@@ -651,7 +703,7 @@ export default function EmailDetail({
         <div className="email-meta-row">
           <div className="email-meta-left">
             <span className="account-source">
-              Thread in <strong>{email.account_email}</strong> ({messagesToRender.length} message{messagesToRender.length === 1 ? '' : 's'})
+              Thread in <strong>{email.account_email}</strong> ({uniqueMessages.length} message{uniqueMessages.length === 1 ? '' : 's'})
             </span>
           </div>
           <div className="email-meta-right">
@@ -663,8 +715,12 @@ export default function EmailDetail({
 
       {/* Render all messages in the conversation thread chronologically */}
       <div style={{ flex: '1 1 0%', minHeight: 0, overflowY: 'auto', background: '#f8fafc', padding: '20px 24px' }}>
-        {messagesToRender.map((msg) => (
-          <ThreadMessageItem key={msg.id} msg={msg} />
+        {uniqueMessages.map((msg, index) => (
+          <ThreadMessageItem
+            key={msg.id}
+            msg={msg}
+            defaultExpanded={index === uniqueMessages.length - 1 || uniqueMessages.length === 1}
+          />
         ))}
       </div>
 

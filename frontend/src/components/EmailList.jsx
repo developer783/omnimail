@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mail, Star, ExternalLink, Clock } from 'lucide-react';
+import { Mail, Star, ExternalLink, Clock, CheckCheck } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 
 export default function EmailList({
@@ -193,6 +193,27 @@ export default function EmailList({
                     <span className="account-tag" title={`Belongs to ${thread.accountEmail}`}>
                       {thread.accountEmail}
                     </span>
+
+                    {/* Replied Tag Badge */}
+                    {thread.hasReplied && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: '#16a34a',
+                          background: '#f0fdf4',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          border: '1px solid #bbf7d0'
+                        }}
+                        title="Replied to this thread"
+                      >
+                        <CheckCheck size={11} /> Replied
+                      </span>
+                    )}
 
                     {/* Expiring Soon Badge (over 20h old) */}
                     {dateInfo.isExpiringSoon && !thread.hasReplied && (

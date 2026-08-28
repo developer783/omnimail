@@ -369,6 +369,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 msg_id = msg_item["id"]
                 if msg_id in existing_ids:
                     continue
+                existing_ids.add(msg_id)
 
                 detail_resp = client.get(
                     f"{GMAIL_API_BASE}/messages/{msg_id}",
@@ -400,7 +401,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
 
                 if is_sent_mail:
                     sender = f"Me <{account.google_email}>"
-                    recipient = raw_to if raw_to else "Unknown Recipient"
+                    recipient = raw_to if (raw_to and raw_to.strip() and raw_to.strip() != "Unknown Recipient") else "Recipient"
                     folder_status = "replied"
                 else:
                     sender = raw_from
