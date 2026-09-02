@@ -243,6 +243,9 @@ def _parse_header(headers: list, name: str, default: str = "") -> str:
 
 def send_gmail_mime_message(db: Session, account: ConnectedAccount, raw_mime_bytes: bytes, thread_id: Optional[str] = None) -> dict:
     access_token = get_valid_access_token(db, account)
+    if access_token.startswith("demo_"):
+        return {"id": f"sent_demo_{int(datetime.datetime.utcnow().timestamp())}", "threadId": thread_id or "demo_thread"}
+
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json"

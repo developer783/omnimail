@@ -393,7 +393,7 @@ export default function EmailDetail({
   // Keyboard shortcut listener: Ctrl+Enter / Cmd+Enter to send, Escape to discard
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (!composerMode) return;
+      if (!composerMode || isSending) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         handleSend();
@@ -404,7 +404,7 @@ export default function EmailDetail({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [composerMode, toField, ccField, bccField, bodyText]);
+  }, [composerMode, isSending, toField, ccField, bccField, bodyText]);
 
   if (!email) {
     return (
@@ -567,6 +567,7 @@ export default function EmailDetail({
   };
 
   const handleSend = async () => {
+    if (isSending) return;
     let contentHtml = editorRef.current ? editorRef.current.innerHTML : bodyText;
     if (isPlainTextMode && editorRef.current) {
       contentHtml = `<pre style="font-family: monospace; white-space: pre-wrap;">${editorRef.current.innerText}</pre>`;
