@@ -175,7 +175,9 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
                 {bodySnippet || msg.subject}
               </span>
             ) : (
-              <span style={{ fontSize: '11.5px', color: '#64748b' }}>To: {msg.recipient || (isSentByMe ? 'Recipient' : 'Me')}</span>
+              <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                To: {msg.recipient && msg.recipient !== 'Recipient' ? msg.recipient : (isSentByMe ? (msg.account_email || 'Me') : 'Me')}
+              </span>
             )}
           </div>
         </div>
@@ -199,15 +201,22 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
       {isExpanded && (
         <>
           <div className="iframe-container" style={{ padding: '8px 0', minHeight: '150px' }}>
-            <iframe
-              ref={iframeRef}
-              title={`Email Message ${msg.id}`}
-              className="email-iframe"
-              srcDoc={msg.html_body}
-              onLoad={handleIframeLoad}
-              style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
-              sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-            />
+            {msg.html_body && msg.html_body.trim() ? (
+              <iframe
+                ref={iframeRef}
+                title={`Email Message ${msg.id}`}
+                className="email-iframe"
+                srcDoc={msg.html_body}
+                onLoad={handleIframeLoad}
+                onError={(err) => console.error(`[EmailDetail Error] Iframe load error for msg ${msg.id}:`, err)}
+                style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
+                sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+              />
+            ) : (
+              <div style={{ padding: '16px 20px', color: '#94a3b8', fontStyle: 'italic', fontSize: '13px' }}>
+                (Empty message body or body data unavailable)
+              </div>
+            )}
           </div>
 
           {msg.attachments && msg.attachments.length > 0 && (

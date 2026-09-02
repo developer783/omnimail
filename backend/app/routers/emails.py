@@ -264,15 +264,14 @@ def reply_to_email(
     raw_subj = email_obj.subject or ""
     clean_subj = raw_subj if raw_subj.lower().startswith("re:") else f"Re: {raw_subj}"
     
-    if reply_req.to and reply_req.to.strip():
+    if reply_req.to and reply_req.to.strip() and reply_req.to.strip() != "Recipient":
         to_recipient = reply_req.to.strip()
-    elif email_obj.sender and (email_obj.sender.startswith("Me ") or email_obj.sender.lower().startswith("me <")):
-        to_recipient = email_obj.recipient or account.google_email
+    elif email_obj.sender and not (email_obj.sender.startswith("Me ") or email_obj.sender.lower().startswith("me <")):
+        to_recipient = email_obj.sender
+    elif email_obj.recipient and email_obj.recipient.strip() and email_obj.recipient.strip() != "Recipient":
+        to_recipient = email_obj.recipient
     else:
-        to_recipient = email_obj.sender or "Unknown Recipient"
-
-    if not to_recipient or to_recipient == "Unknown Recipient":
-        to_recipient = email_obj.recipient if email_obj.recipient else account.google_email
+        to_recipient = account.google_email
 
     msg = MIMEMultipart("alternative")
     msg["From"] = account.google_email
@@ -303,6 +302,7 @@ def reply_to_email(
     if not email_obj.gmail_thread_id or email_obj.gmail_thread_id != target_thread_id:
         email_obj.gmail_thread_id = target_thread_id
 
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
     sent_email_record = Email(
         account_id=account.id,
         gmail_message_id=sent_gmail_id,
@@ -312,8 +312,8 @@ def reply_to_email(
         recipient=to_recipient,
         subject=clean_subj,
         html_body=reply_req.body_html,
-        received_at=datetime.datetime.utcnow(),
-        fetched_at=datetime.datetime.utcnow(),
+        received_at=now_utc,
+        fetched_at=now_utc,
         is_read=True,
         is_starred=False,
         folder_status="replied"

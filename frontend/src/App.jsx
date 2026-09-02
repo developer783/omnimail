@@ -69,8 +69,7 @@ export default function App() {
       setSelectedEmail(prevSelected => {
         if (!prevSelected) return null;
         const allItems = response.items || [];
-        const updatedSelected = allItems.find(e => e.id === prevSelected.id);
-        if (!updatedSelected) return prevSelected;
+        const updatedSelected = allItems.find(e => e.id === prevSelected.id) || prevSelected;
         
         const tId = updatedSelected.gmail_thread_id && updatedSelected.gmail_thread_id.trim();
         const mId = updatedSelected.gmail_message_id && updatedSelected.gmail_message_id.trim();
@@ -82,16 +81,27 @@ export default function App() {
 
         const seenIds = new Set();
         const threadMsgs = [];
-        rawThreadMsgs.forEach(m => {
-          if (!seenIds.has(m.id)) {
+        const existingMsgs = prevSelected.threadMessages || [];
+        existingMsgs.forEach(m => {
+          if (m && m.id && !seenIds.has(m.id)) {
             seenIds.add(m.id);
             threadMsgs.push(m);
           }
         });
+        rawThreadMsgs.forEach(m => {
+          if (m && m.id) {
+            if (!seenIds.has(m.id)) {
+              seenIds.add(m.id);
+              threadMsgs.push(m);
+            } else {
+              const idx = threadMsgs.findIndex(existing => existing.id === m.id);
+              if (idx !== -1) threadMsgs[idx] = { ...threadMsgs[idx], ...m };
+            }
+          }
+        });
         threadMsgs.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
 
-        const combinedMsgs = threadMsgs.length > 0 ? threadMsgs : (prevSelected.threadMessages || [updatedSelected]);
-        return { ...updatedSelected, threadMessages: combinedMsgs };
+        return { ...updatedSelected, threadMessages: threadMsgs.length > 0 ? threadMsgs : [updatedSelected] };
       });
     } catch (err) {
       console.error('Error loading dashboard data:', err);

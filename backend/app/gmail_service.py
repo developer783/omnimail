@@ -401,7 +401,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
 
                 if is_sent_mail:
                     sender = f"Me <{account.google_email}>"
-                    recipient = raw_to if (raw_to and raw_to.strip() and raw_to.strip() != "Unknown Recipient") else "Recipient"
+                    recipient = raw_to if (raw_to and raw_to.strip() and raw_to.strip() not in ["Unknown Recipient", "Recipient"]) else account.google_email
                     folder_status = "replied"
                 else:
                     sender = raw_from
