@@ -11,6 +11,7 @@ from app.database import engine, Base
 from app.routers.auth import router as auth_router
 from app.routers.google_oauth import router as google_oauth_router
 from app.routers.emails import router as emails_router
+from app.routers.drafts import router as drafts_router
 from app.routers.filters import router as filters_router
 from app.scheduler import start_scheduler, stop_scheduler
 
@@ -63,6 +64,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(google_oauth_router)
 app.include_router(emails_router)
+app.include_router(drafts_router)
 app.include_router(filters_router)
 
 @app.get("/health", tags=["Health"])

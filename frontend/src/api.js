@@ -118,6 +118,24 @@ export const api = {
 
   syncEmails: () => request('/emails/sync', { method: 'POST' }),
 
+  getDrafts: (accountId = null) => {
+    const params = new URLSearchParams();
+    if (accountId) params.append('account_id', accountId);
+    return request(`/drafts?${params.toString()}`);
+  },
+
+  saveDraft: (draftData) =>
+    request('/drafts', {
+      method: 'POST',
+      body: JSON.stringify(draftData),
+    }),
+
+  deleteDraft: (draftId) =>
+    request(`/drafts/${draftId}`, { method: 'DELETE' }),
+
+  sendDraft: (draftId) =>
+    request(`/drafts/${draftId}/send`, { method: 'POST' }),
+
   downloadAttachment: async (emailId, attachmentId, filename) => {
     const token = getStoredToken();
     const headers = {};

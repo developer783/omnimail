@@ -16,11 +16,13 @@ export default function App() {
 
   const [accounts, setAccounts] = useState([]);
   const [emails, setEmails] = useState([]);
+  const [drafts, setDrafts] = useState([]);
   const [folderCounts, setFolderCounts] = useState({});
 
   const [selectedAccountId, setSelectedAccountId] = useState(null);
   const [activeFolder, setActiveFolder] = useState('inbox');
   const [selectedEmail, setSelectedEmail] = useState(null);
+  const [selectedDraft, setSelectedDraft] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
 
@@ -54,7 +56,7 @@ export default function App() {
     }
   }, []);
 
-  // Fetch emails, folder counts, connected accounts, and keyword filters
+  // Fetch emails, drafts, folder counts, connected accounts, and keyword filters
   const loadData = useCallback(async () => {
     if (!isAuthenticated) return;
     try {
@@ -63,6 +65,14 @@ export default function App() {
       setAccounts(response.accounts || []);
       setFolderCounts(response.folder_counts || {});
       setFilters(response.filters || []);
+
+      try {
+        const draftsRes = await api.getDrafts(selectedAccountId);
+        setDrafts(draftsRes.items || []);
+      } catch (e) {
+        console.error('Error fetching drafts:', e);
+      }
+
       setLastCheckedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
 
       // Keep selected email updated without depending on selectedEmail state
@@ -332,11 +342,13 @@ export default function App() {
           onSelectAccount={(accId) => {
             setSelectedAccountId(accId);
             setSelectedEmail(null);
+            setSelectedDraft(null);
           }}
           activeFolder={activeFolder}
           onSelectFolder={(folderId) => {
             setActiveFolder(folderId);
             setSelectedEmail(null);
+            setSelectedDraft(null);
           }}
           folderCounts={folderCounts}
           filters={filters}
@@ -353,12 +365,19 @@ export default function App() {
 
         <EmailList
           emails={emails}
+          drafts={drafts}
           selectedEmailId={selectedEmail ? selectedEmail.id : null}
+          selectedDraftId={selectedDraft ? selectedDraft.id : null}
           onSelectEmail={(email, threadMsgs) => {
+            setSelectedDraft(null);
             setSelectedEmail({ ...email, threadMessages: threadMsgs || [email] });
             if (!email.is_read) {
               handleToggleRead(email);
             }
+          }}
+          onSelectDraft={(draft) => {
+            setSelectedEmail(null);
+            setSelectedDraft(draft);
           }}
           activeFolder={activeFolder}
           activeAccountEmail={activeAccountEmail}
@@ -367,8 +386,9 @@ export default function App() {
         />
 
         <EmailDetail
-          key={selectedEmail ? selectedEmail.id : 'empty'}
+          key={selectedEmail ? `email_${selectedEmail.id}` : (selectedDraft ? `draft_${selectedDraft.id}` : 'empty')}
           email={selectedEmail}
+          activeDraft={selectedDraft}
           onToggleStar={handleToggleStar}
           onToggleRead={handleToggleRead}
           onChangeFolderStatus={handleChangeFolderStatus}

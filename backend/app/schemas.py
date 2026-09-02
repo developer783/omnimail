@@ -108,7 +108,54 @@ class FolderCounts(BaseModel):
     starred: int = 0
     follow_up: int = 0
     replied: int = 0
+    sent: int = 0
     snoozed: int = 0
+    drafts: int = 0
+
+class DraftCreate(BaseModel):
+    id: Optional[int] = None
+    account_id: int
+    gmail_thread_id: Optional[str] = None
+    email_id: Optional[int] = None
+    to_recipients: Optional[str] = None
+    cc: Optional[str] = None
+    bcc: Optional[str] = None
+    subject: Optional[str] = None
+    html_body: Optional[str] = None
+    composer_mode: str = "reply"
+
+class DraftOut(BaseModel):
+    id: int
+    account_id: int
+    account_email: str
+    gmail_thread_id: Optional[str] = None
+    email_id: Optional[int] = None
+    to_recipients: Optional[str] = None
+    cc: Optional[str] = None
+    bcc: Optional[str] = None
+    subject: Optional[str] = None
+    html_body: Optional[str] = None
+    composer_mode: str = "reply"
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @field_serializer("created_at", "updated_at", mode="plain")
+    def serialize_datetime(self, dt: Optional[datetime.datetime]) -> Optional[str]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        iso_str = dt.isoformat()
+        if not iso_str.endswith("Z") and not "+" in iso_str:
+            iso_str += "Z"
+        return iso_str.replace("+00:00", "Z")
+
+    class Config:
+        from_attributes = True
+
+class DraftListResponse(BaseModel):
+    items: List[DraftOut]
+    total: int
 
 class EmailListResponse(BaseModel):
     items: List[EmailOut]

@@ -253,6 +253,7 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
 
 export default function EmailDetail({
   email,
+  activeDraft,
   onToggleStar,
   onToggleRead,
   onChangeFolderStatus,
@@ -265,6 +266,7 @@ export default function EmailDetail({
   const [subjectField, setSubjectField] = useState('');
   const [showCcBcc, setShowCcBcc] = useState(false);
   
+  const [activeDraftId, setActiveDraftId] = useState(null);
   const [showFormatToolbar, setShowFormatToolbar] = useState(true);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -341,18 +343,41 @@ export default function EmailDetail({
     }
   };
 
+  // Pre-fill composer when activeDraft prop is selected
+  useEffect(() => {
+    if (activeDraft) {
+      setActiveDraftId(activeDraft.id);
+      setComposerMode(activeDraft.composer_mode || 'reply');
+      setToField(activeDraft.to_recipients || '');
+      setCcField(activeDraft.cc || '');
+      setBccField(activeDraft.bcc || '');
+      setSubjectField(activeDraft.subject || '');
+      setBodyText(activeDraft.html_body || '');
+      if (activeDraft.cc || activeDraft.bcc) setShowCcBcc(true);
+
+      setTimeout(() => {
+        if (editorRef.current && activeDraft.html_body) {
+          editorRef.current.innerHTML = activeDraft.html_body;
+        }
+      }, 50);
+    }
+  }, [activeDraft?.id]);
+
   // Reset composer state whenever the selected email ID changes
   useEffect(() => {
-    setComposerMode(null);
-    setToField('');
-    setCcField('');
-    setBccField('');
-    setSubjectField('');
-    setBodyText('');
-    setAttachments([]);
-    setErrorMsg('');
-    setIsPopout(false);
-    setIframeHeight('600px');
+    if (!activeDraft) {
+      setActiveDraftId(null);
+      setComposerMode(null);
+      setToField('');
+      setCcField('');
+      setBccField('');
+      setSubjectField('');
+      setBodyText('');
+      setAttachments([]);
+      setErrorMsg('');
+      setIsPopout(false);
+      setIframeHeight('600px');
+    }
 
     const timer = setTimeout(() => {
       updateIframeHeight();
@@ -360,27 +385,38 @@ export default function EmailDetail({
     return () => clearTimeout(timer);
   }, [email?.id]);
 
-  // Auto-save draft to localStorage every 3 seconds
+  // Auto-save draft to DB API every 3 seconds while composer is active
   useEffect(() => {
-    if (!email || !composerMode) return;
-    const draftKey = `omnimail_draft_${email.id}`;
+    if (!composerMode) return;
     let toastTimeout;
 
-    const timer = setInterval(() => {
+    const timer = setInterval(async () => {
       const currentHtml = editorRef.current ? editorRef.current.innerHTML : bodyText;
-      if (currentHtml && currentHtml.trim() && currentHtml !== '<br>') {
-        localStorage.setItem(draftKey, JSON.stringify({
-          composerMode,
-          toField,
-          ccField,
-          bccField,
-          subjectField,
-          bodyHtml: currentHtml,
-          updatedAt: new Date().toISOString()
-        }));
-        setDraftSavedToast(true);
-        if (toastTimeout) clearTimeout(toastTimeout);
-        toastTimeout = setTimeout(() => setDraftSavedToast(false), 2000);
+      const targetAccId = email?.account_id || activeDraft?.account_id;
+      if (targetAccId && currentHtml && currentHtml.trim() && currentHtml !== '<br>') {
+        try {
+          const draftRes = await api.saveDraft({
+            id: activeDraftId,
+            account_id: targetAccId,
+            gmail_thread_id: email?.gmail_thread_id || activeDraft?.gmail_thread_id || null,
+            email_id: email?.id || activeDraft?.email_id || null,
+            to_recipients: toField,
+            cc: ccField,
+            bcc: bccField,
+            subject: subjectField,
+            html_body: currentHtml,
+            composer_mode: composerMode
+          });
+          if (draftRes && draftRes.id) {
+            setActiveDraftId(draftRes.id);
+          }
+          setDraftSavedToast(true);
+          if (toastTimeout) clearTimeout(toastTimeout);
+          toastTimeout = setTimeout(() => setDraftSavedToast(false), 2000);
+          if (onRefresh) onRefresh();
+        } catch (e) {
+          console.error("Autosave draft error:", e);
+        }
       }
     }, 3000);
 
@@ -388,7 +424,7 @@ export default function EmailDetail({
       clearInterval(timer);
       if (toastTimeout) clearTimeout(toastTimeout);
     };
-  }, [email, composerMode, toField, ccField, bccField, subjectField, bodyText]);
+  }, [email, activeDraft, activeDraftId, composerMode, toField, ccField, bccField, subjectField, bodyText]);
 
   // Keyboard shortcut listener: Ctrl+Enter / Cmd+Enter to send, Escape to discard
   useEffect(() => {
@@ -406,65 +442,51 @@ export default function EmailDetail({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [composerMode, isSending, toField, ccField, bccField, bodyText]);
 
-  if (!email) {
+  if (!email && !activeDraft) {
     return (
       <div className="email-detail-pane">
         <div className="empty-state">
           <div className="empty-icon-large">
             <Mail size={44} />
           </div>
-          <h3 className="empty-title">Select an Email Thread</h3>
+          <h3 className="empty-title">Select an Email Thread or Draft</h3>
           <p className="empty-subtitle">
-            Choose a message from the conversation list to view its complete original HTML content preserved exactly as received from Gmail.
+            Choose a message from the conversation list or a saved draft to view and edit.
           </p>
         </div>
       </div>
     );
   }
 
-  const senderInitial = (email.sender || 'U').replace(/<.*>/, '').trim().charAt(0).toUpperCase() || 'U';
-  
-  let formattedDate = email.received_at;
-  try {
-    let dateStr = email.received_at;
-    if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+')) {
-      dateStr = dateStr + 'Z';
-    }
-    formattedDate = format(new Date(dateStr), 'EEEE, MMMM d, yyyy @ h:mm a');
-  } catch (e) {
-    // Keep raw date string
-  }
-
-  const gmailDeepLink = `https://mail.google.com/mail/?authuser=${encodeURIComponent(email.account_email)}#inbox/${email.gmail_message_id}`;
+  const activeEmailObj = email || {
+    id: activeDraft?.email_id || -1,
+    sender: activeDraft?.to_recipients || 'Draft',
+    subject: activeDraft?.subject || '(Draft No Subject)',
+    account_email: activeDraft?.account_email || '',
+    received_at: activeDraft?.updated_at || new Date().toISOString(),
+    is_starred: false,
+    is_read: true,
+    folder_status: 'draft',
+    html_body: activeDraft?.html_body || ''
+  };
 
   const handleStartReply = (mode) => {
     setComposerMode(mode);
     setErrorMsg('');
     setAttachments([]);
-    
-    // Check if draft exists in localStorage
-    const draftKey = `omnimail_draft_${email.id}`;
-    const savedDraftStr = localStorage.getItem(draftKey);
     let loadedBody = '';
 
-    if (savedDraftStr) {
-      try {
-        const savedDraft = JSON.parse(savedDraftStr);
-        loadedBody = savedDraft.bodyHtml || '';
-      } catch (e) {}
-    }
-
-    setBodyText(loadedBody);
-
-    if (mode === 'reply') {
-      setToField(email.sender);
-      setSubjectField(email.subject ? `Re: ${email.subject.replace(/^re:\s*/i, '')}` : 'Re: ');
-    } else if (mode === 'reply_all') {
-      setToField(email.sender);
-      setSubjectField(email.subject ? `Re: ${email.subject.replace(/^re:\s*/i, '')}` : 'Re: ');
-    } else if (mode === 'forward') {
-      setToField('');
-      setSubjectField(email.subject ? `Fwd: ${email.subject.replace(/^fwd:\s*/i, '')}` : 'Fwd: ');
+    if (email) {
+      if (mode === 'reply') {
+        setToField(email.sender);
+        setSubjectField(email.subject ? `Re: ${email.subject.replace(/^re:\s*/i, '')}` : 'Re: ');
+      } else if (mode === 'reply_all') {
+        setToField(email.sender);
+        setSubjectField(email.subject ? `Re: ${email.subject.replace(/^re:\s*/i, '')}` : 'Re: ');
+      } else if (mode === 'forward') {
+        setToField('');
+        setSubjectField(email.subject ? `Fwd: ${email.subject.replace(/^fwd:\s*/i, '')}` : 'Fwd: ');
+      }
     }
 
     setTimeout(() => {
@@ -474,18 +496,29 @@ export default function EmailDetail({
     }, 50);
   };
 
-  const handlePromptDiscard = () => {
-    const currentHtml = editorRef.current ? editorRef.current.innerHTML : bodyText;
-    if (currentHtml && currentHtml.trim() && currentHtml !== '<br>') {
-      if (window.confirm('Discard this draft?')) {
+  const handlePromptDiscard = async () => {
+    if (activeDraftId) {
+      if (window.confirm('Discard and delete this draft permanently?')) {
+        try {
+          await api.deleteDraft(activeDraftId);
+        } catch (e) {}
         handleCloseComposer();
+        if (onRefresh) onRefresh();
       }
     } else {
-      handleCloseComposer();
+      const currentHtml = editorRef.current ? editorRef.current.innerHTML : bodyText;
+      if (currentHtml && currentHtml.trim() && currentHtml !== '<br>') {
+        if (window.confirm('Discard this draft?')) {
+          handleCloseComposer();
+        }
+      } else {
+        handleCloseComposer();
+      }
     }
   };
 
   const handleCloseComposer = () => {
+    setActiveDraftId(null);
     if (email) {
       localStorage.removeItem(`omnimail_draft_${email.id}`);
     }
@@ -556,7 +589,6 @@ export default function EmailDetail({
 
   const togglePlainTextMode = () => {
     if (!isPlainTextMode) {
-      // Stripping HTML tags to plain text
       const rawText = editorRef.current ? editorRef.current.innerText : '';
       if (editorRef.current) editorRef.current.innerText = rawText;
       setIsPlainTextMode(true);
@@ -582,7 +614,9 @@ export default function EmailDetail({
     setErrorMsg('');
 
     try {
-      if (composerMode === 'forward') {
+      if (activeDraftId) {
+        await api.sendDraft(activeDraftId);
+      } else if (composerMode === 'forward') {
         if (!toField.trim()) {
           setErrorMsg('Please enter a recipient email address to forward.');
           setIsSending(false);
@@ -594,7 +628,7 @@ export default function EmailDetail({
           cc: ccField.trim() || null,
           bcc: bccField.trim() || null
         });
-      } else {
+      } else if (email) {
         await api.replyToEmail(email.id, {
           to: toField.trim() || null,
           body_html: contentHtml,

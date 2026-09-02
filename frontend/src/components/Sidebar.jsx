@@ -6,6 +6,8 @@ import {
   Clock,
   CheckCheck,
   Bookmark,
+  FileText,
+  Send,
   Plus,
   LogOut,
   RefreshCw,
@@ -64,6 +66,8 @@ export default function Sidebar({
     { id: 'starred', label: 'Starred', icon: Star, count: folderCounts?.starred || 0 },
     { id: 'follow_up', label: 'Follow Up', icon: Bookmark, count: folderCounts?.follow_up || 0 },
     { id: 'replied', label: 'Replied', icon: CheckCheck, count: folderCounts?.replied || 0 },
+    { id: 'sent', label: 'Sent', icon: Send, count: folderCounts?.sent || 0 },
+    { id: 'drafts', label: 'Drafts', icon: FileText, count: folderCounts?.drafts || 0 },
     { id: 'snoozed', label: 'Snoozed', icon: Clock, count: folderCounts?.snoozed || 0 },
   ];
 

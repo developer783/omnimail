@@ -62,3 +62,23 @@ class KeywordFilter(Base):
     keyword = Column(String(255), nullable=False)
     field = Column(String(50), nullable=False, default="any") # 'subject', 'sender', 'body', 'any'
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+class Draft(Base):
+    __tablename__ = "drafts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    account_id = Column(Integer, ForeignKey("connected_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    gmail_thread_id = Column(String(255), nullable=True, index=True)
+    email_id = Column(Integer, ForeignKey("emails.id", ondelete="SET NULL"), nullable=True, index=True)
+    to_recipients = Column(String(512), nullable=True)
+    cc = Column(String(512), nullable=True)
+    bcc = Column(String(512), nullable=True)
+    subject = Column(String(1024), nullable=True)
+    html_body = Column(Text, nullable=True)
+    composer_mode = Column(String(50), default="reply", nullable=False) # 'reply', 'reply_all', 'forward', 'compose'
+    created_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+
+    account = relationship("ConnectedAccount")
+    email = relationship("Email")
+

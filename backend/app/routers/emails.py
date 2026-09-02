@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, func
 
 from app.database import get_db
-from app.models import ConnectedAccount, Email, KeywordFilter, EmailAttachment
+from app.models import ConnectedAccount, Email, KeywordFilter, EmailAttachment, Draft
 from app.schemas import (
     EmailOut, EmailListResponse, SyncResponse, FolderCounts, EmailUpdate,
     EmailReplyRequest, EmailForwardRequest
@@ -69,15 +69,30 @@ def get_emails(
         )
     else:
         # Determine matching thread_ids and individual message IDs based on folder / flags
+        # Distinct thread_ids containing at least one inbound message
+        inbound_tids = db.query(Email.gmail_thread_id).filter(
+            Email.sender.notilike("Me %"),
+            Email.gmail_thread_id.isnot(None),
+            Email.gmail_thread_id != ""
+        ).distinct()
+
         folder_match_query = base_query
+
         if folder == "unread":
             folder_match_query = folder_match_query.filter(Email.is_read == False)
         elif folder == "starred":
             folder_match_query = folder_match_query.filter(Email.is_starred == True)
         elif folder == "replied":
-            # Strict Replied definition: threads containing an actual outbound message sent by the user
+            # Genuine replied threads: outbound reply in response to prior inbound email
             folder_match_query = folder_match_query.filter(
-                (Email.sender.ilike("Me %")) | (Email.folder_status == "replied")
+                (Email.folder_status == "replied") |
+                ((Email.sender.ilike("Me %")) & (Email.gmail_thread_id.in_(inbound_tids)))
+            )
+        elif folder == "sent":
+            # Original sent threads: standalone outbound sends with no prior inbound email
+            folder_match_query = folder_match_query.filter(
+                (Email.folder_status == "sent") |
+                ((Email.sender.ilike("Me %")) & (~Email.gmail_thread_id.in_(inbound_tids)))
             )
         elif folder in ["follow_up", "snoozed"]:
             folder_match_query = folder_match_query.filter(Email.folder_status == folder)
@@ -126,16 +141,31 @@ def get_emails(
 
     # Calculate Folder Counts across current context (or global) by unique thread_id
     cnt_query = db.query(Email)
+    draft_cnt_query = db.query(Draft)
     if account_id:
         cnt_query = cnt_query.filter(Email.account_id == account_id)
+        draft_cnt_query = draft_cnt_query.filter(Draft.account_id == account_id)
+
+    inbound_tids_cnt = cnt_query.filter(
+        Email.sender.notilike("Me %"),
+        Email.gmail_thread_id.isnot(None),
+        Email.gmail_thread_id != ""
+    ).with_entities(Email.gmail_thread_id).distinct()
 
     inbox_cnt = cnt_query.filter((Email.folder_status == "inbox") | (Email.folder_status == "replied") | (Email.sender.ilike("Me %"))).with_entities(Email.gmail_thread_id).distinct().count()
     unread_cnt = cnt_query.filter(Email.is_read == False).with_entities(Email.gmail_thread_id).distinct().count()
     starred_cnt = cnt_query.filter(Email.is_starred == True).with_entities(Email.gmail_thread_id).distinct().count()
     follow_up_cnt = cnt_query.filter(Email.folder_status == "follow_up").with_entities(Email.gmail_thread_id).distinct().count()
-    # Replied folder count: ONLY threads containing an actual outbound reply message
-    replied_cnt = cnt_query.filter((Email.sender.ilike("Me %")) | (Email.folder_status == "replied")).with_entities(Email.gmail_thread_id).distinct().count()
+    replied_cnt = cnt_query.filter(
+        (Email.folder_status == "replied") |
+        ((Email.sender.ilike("Me %")) & (Email.gmail_thread_id.in_(inbound_tids_cnt)))
+    ).with_entities(Email.gmail_thread_id).distinct().count()
+    sent_cnt = cnt_query.filter(
+        (Email.folder_status == "sent") |
+        ((Email.sender.ilike("Me %")) & (~Email.gmail_thread_id.in_(inbound_tids_cnt)))
+    ).with_entities(Email.gmail_thread_id).distinct().count()
     snoozed_cnt = cnt_query.filter(Email.folder_status == "snoozed").with_entities(Email.gmail_thread_id).distinct().count()
+    drafts_cnt = draft_cnt_query.count()
 
     folder_counts = FolderCounts(
         inbox=inbox_cnt,
@@ -143,7 +173,9 @@ def get_emails(
         starred=starred_cnt,
         follow_up=follow_up_cnt,
         replied=replied_cnt,
-        snoozed=snoozed_cnt
+        sent=sent_cnt,
+        snoozed=snoozed_cnt,
+        drafts=drafts_cnt
     )
 
     accounts_meta = list_connected_accounts(db=db, current_user=current_user)

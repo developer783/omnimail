@@ -1,17 +1,42 @@
 import React from 'react';
-import { Mail, Star, ExternalLink, Clock, CheckCheck } from 'lucide-react';
+import { Mail, Star, ExternalLink, Clock, CheckCheck, FileText, Send } from 'lucide-react';
 import { formatDistanceToNow, format } from 'date-fns';
 
 export default function EmailList({
   emails,
+  drafts = [],
   selectedEmailId,
+  selectedDraftId,
   onSelectEmail,
+  onSelectDraft,
   activeFolder,
   activeAccountEmail,
   onToggleStar,
   onToggleRead
 }) {
   const groupedThreads = React.useMemo(() => {
+    if (activeFolder === 'drafts') {
+      if (!drafts || drafts.length === 0) return [];
+      return drafts.map(draft => ({
+        threadId: `draft_${draft.id}`,
+        isDraft: true,
+        isSent: false,
+        hasReplied: false,
+        draft: draft,
+        latestMessage: null,
+        firstMessage: null,
+        messages: [],
+        subject: draft.subject || '(Draft No Subject)',
+        participantNames: [draft.to_recipients ? `To: ${draft.to_recipients}` : 'Draft (No Recipient)'],
+        sendersDisplay: draft.to_recipients ? `Draft to: ${draft.to_recipients}` : 'Draft (No Recipient)',
+        messageCount: 1,
+        isUnread: false,
+        isStarred: false,
+        receivedAt: draft.updated_at,
+        accountEmail: draft.account_email
+      })).sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+    }
+
     if (!emails || emails.length === 0) return [];
     
     const threadMap = new Map();
@@ -51,10 +76,18 @@ export default function EmailList({
       
       const isUnread = msgList.some(m => !m.is_read);
       const isStarred = msgList.some(m => m.is_starred);
-      const hasReplied = msgList.some(m => m.folder_status === 'replied' || m.sender.startsWith('Me '));
+      
+      const hasInbound = msgList.some(m => m.sender && !m.sender.startsWith('Me ') && !m.sender.toLowerCase().includes('me <'));
+      const hasOutbound = msgList.some(m => m.sender && (m.sender.startsWith('Me ') || m.sender.toLowerCase().includes('me <')));
+
+      const hasReplied = (hasInbound && hasOutbound) || msgList.some(m => m.folder_status === 'replied');
+      const isSent = (hasOutbound && !hasInbound) || msgList.some(m => m.folder_status === 'sent');
 
       threads.push({
         threadId: threadKey,
+        isDraft: false,
+        isSent,
+        hasReplied,
         messages: msgList,
         latestMessage: latestMsg,
         firstMessage: firstMsg,
@@ -64,7 +97,6 @@ export default function EmailList({
         messageCount: msgList.length,
         isUnread,
         isStarred,
-        hasReplied,
         receivedAt: latestMsg.received_at,
         accountEmail: latestMsg.account_email
       });
@@ -73,7 +105,7 @@ export default function EmailList({
     // Sort threads by latest message timestamp descending
     threads.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
     return threads;
-  }, [emails]);
+  }, [emails, drafts, activeFolder]);
 
   const formatDateInfo = (dateString) => {
     try {
@@ -105,6 +137,8 @@ export default function EmailList({
       case 'starred': return 'Starred Threads';
       case 'follow_up': return 'Follow Up Needed';
       case 'replied': return 'Replied Threads';
+      case 'sent': return 'Sent Messages';
+      case 'drafts': return 'Saved Drafts';
       case 'snoozed': return 'Snoozed Messages';
       default: return 'Inbox Threads (Last 24h)';
     }
@@ -150,7 +184,9 @@ export default function EmailList({
           </div>
         ) : (
           groupedThreads.map((thread) => {
-            const isSelected = thread.messages.some(m => m.id === selectedEmailId);
+            const isSelected = thread.isDraft
+              ? selectedDraftId === thread.draft?.id
+              : thread.messages.some(m => m.id === selectedEmailId);
             const isUnread = thread.isUnread;
             const dateInfo = formatDateInfo(thread.receivedAt);
             const targetMsgForSelection = thread.latestMessage;
@@ -159,7 +195,13 @@ export default function EmailList({
               <div
                 key={thread.threadId}
                 className={`email-card ${isSelected ? 'selected' : ''} ${isUnread ? 'unread-card' : ''}`}
-                onClick={() => onSelectEmail(targetMsgForSelection, thread.messages)}
+                onClick={() => {
+                  if (thread.isDraft) {
+                    if (onSelectDraft) onSelectDraft(thread.draft);
+                  } else {
+                    onSelectEmail(targetMsgForSelection, thread.messages);
+                  }
+                }}
               >
                 <div className="email-card-top">
                   <div className="sender-row">
@@ -194,6 +236,27 @@ export default function EmailList({
                       {thread.accountEmail}
                     </span>
 
+                    {/* Draft Tag Badge */}
+                    {thread.isDraft && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: '#d97706',
+                          background: '#fffbeb',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          border: '1px solid #fde68a'
+                        }}
+                        title="Saved Draft"
+                      >
+                        <FileText size={11} /> Draft
+                      </span>
+                    )}
+
                     {/* Replied Tag Badge */}
                     {thread.hasReplied && (
                       <span
@@ -212,6 +275,27 @@ export default function EmailList({
                         title="Replied to this thread"
                       >
                         <CheckCheck size={11} /> Replied
+                      </span>
+                    )}
+
+                    {/* Sent Tag Badge */}
+                    {thread.isSent && !thread.hasReplied && (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          fontSize: '10.5px',
+                          fontWeight: 700,
+                          color: '#0284c7',
+                          background: '#f0f9ff',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          border: '1px solid #bae6fd'
+                        }}
+                        title="Sent message"
+                      >
+                        <Send size={11} /> Sent
                       </span>
                     )}
 

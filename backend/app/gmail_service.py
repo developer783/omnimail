@@ -400,9 +400,9 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                 if not raw_to:
                     raw_to = _parse_header(msg_headers, "Cc", default="")
 
-                is_sent_mail = "SENT" in label_ids or (account.google_email and account.google_email.lower() in raw_from.lower())
+                is_sent_mail = (account.google_email and account.google_email.lower() in raw_from.lower()) or ("SENT" in label_ids and not ("mailer-daemon" in raw_from.lower() or "mail delivery subsystem" in raw_from.lower()))
 
-                if is_sent_mail:
+                if is_sent_mail and not ("mailer-daemon" in raw_from.lower() or "mail delivery subsystem" in raw_from.lower()):
                     sender = f"Me <{account.google_email}>"
                     recipient = raw_to if (raw_to and raw_to.strip() and raw_to.strip() not in ["Unknown Recipient", "Recipient"]) else account.google_email
                     folder_status = "replied"
