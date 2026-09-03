@@ -63,11 +63,23 @@ export default function EmailList({
     const threadMap = new Map();
     
     targetEmails.forEach(email => {
-      const rawThreadId = email.gmail_thread_id && email.gmail_thread_id.trim() ? email.gmail_thread_id.trim() : null;
-      const cleanSubj = email.subject ? email.subject.replace(/^(re|fwd|fw|reply):\s*/ig, '').replace(/\s+/g, ' ').trim().toLowerCase() : '';
-      const recKey = email.recipient ? email.recipient.replace(/<.*>/, '').trim().toLowerCase() : '';
-      
-      const threadKey = rawThreadId || (cleanSubj ? `subj_${email.account_id}_${recKey}_${cleanSubj}` : `single_${email.id}`);
+      const normSubj = email.subject
+        ? email.subject.replace(/^(re|fwd|fw|reply|\[[^\]]+\]):\s*/ig, '').replace(/[\u2010-\u2015\u2212\-]/g, ' ').replace(/[^\w\s]/gi, '').replace(/\s+/g, ' ').trim().toLowerCase()
+        : '';
+      const isMeSender = email.sender && (
+        email.sender.toLowerCase().includes('me <') ||
+        email.sender.startsWith('Me ') ||
+        (email.account_email && email.sender.toLowerCase().includes(email.account_email.toLowerCase()))
+      );
+      const rawAddr = isMeSender ? (email.recipient || '') : (email.sender || '');
+      const match = rawAddr.match(/<([^>]+)>/);
+      const cleanAddr = match ? match[1] : rawAddr;
+      const extPart = cleanAddr.replace(/<.*>/, '').trim().toLowerCase();
+
+      const threadKey = (normSubj && extPart)
+        ? `thread_${email.account_id}_${extPart}_${normSubj}`
+        : (email.gmail_thread_id && email.gmail_thread_id.trim() ? email.gmail_thread_id.trim() : `single_${email.id}`);
+
       if (!threadMap.has(threadKey)) {
         threadMap.set(threadKey, []);
       }
