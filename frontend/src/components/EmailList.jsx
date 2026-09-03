@@ -279,7 +279,7 @@ export default function EmailList({
                       </span>
                     )}
 
-                    {/* Replied Tag Badge */}
+                    {/* Replied Tag Badge with Reply Count */}
                     {thread.hasReplied && (
                       <span
                         style={{
@@ -294,9 +294,9 @@ export default function EmailList({
                           borderRadius: '4px',
                           border: '1px solid #bbf7d0'
                         }}
-                        title="Replied to this thread"
+                        title={`Replied thread with ${thread.messageCount - 1} reply/replies`}
                       >
-                        <CheckCheck size={11} /> Replied
+                        <CheckCheck size={11} /> Replied ({thread.messageCount - 1 > 0 ? `${thread.messageCount - 1} ${thread.messageCount - 1 === 1 ? 'reply' : 'replies'}` : '1 reply'})
                       </span>
                     )}
 
@@ -321,8 +321,8 @@ export default function EmailList({
                       </span>
                     )}
 
-                    {/* Expiring Soon Badge (over 20h old) */}
-                    {dateInfo.isExpiringSoon && !thread.hasReplied && (
+                    {/* 24-Hour Expiration Time Limit Badge */}
+                    {!thread.isDraft && (
                       <span
                         style={{
                           display: 'inline-flex',
@@ -330,15 +330,15 @@ export default function EmailList({
                           gap: '3px',
                           fontSize: '10.5px',
                           fontWeight: 700,
-                          color: '#dc2626',
-                          background: '#fef2f2',
+                          color: dateInfo.isExpiringSoon ? '#dc2626' : '#475569',
+                          background: dateInfo.isExpiringSoon ? '#fef2f2' : '#f1f5f9',
                           padding: '2px 6px',
                           borderRadius: '4px',
-                          border: '1px solid #fecaca'
+                          border: dateInfo.isExpiringSoon ? '1px solid #fecaca' : '1px solid #cbd5e1'
                         }}
-                        title={`Received ${Math.round(dateInfo.diffHours)}h ago. Will roll off in ~${dateInfo.hoursLeft}h`}
+                        title={`Received ${Math.round(dateInfo.diffHours)}h ago. Expires & rolls off in ~${dateInfo.hoursLeft}h`}
                       >
-                        <Clock size={11} /> Expiring ({dateInfo.hoursLeft}h left)
+                        <Clock size={11} /> {dateInfo.hoursLeft}h left
                       </span>
                     )}
                   </div>

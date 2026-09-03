@@ -38,10 +38,8 @@ def get_emails(
     )
 
     cutoff_24h = datetime.datetime.utcnow() - datetime.timedelta(hours=24)
-    # Enforce rolling 24-hour retention filter for inbound emails (preserve sent replies and sent emails)
-    base_query = raw_base_query.filter(
-        (Email.received_at >= cutoff_24h) | (Email.folder_status == "replied") | (Email.sender.ilike("Me %"))
-    )
+    # Enforce strict 24-hour expiration window across all messages and threads
+    base_query = raw_base_query.filter(Email.received_at >= cutoff_24h)
 
     if account_id:
         raw_base_query = raw_base_query.filter(Email.account_id == account_id)
@@ -146,7 +144,7 @@ def get_emails(
         )
 
     # Calculate Folder Counts across current context (or global) by unique thread_id
-    cnt_query = db.query(Email)
+    cnt_query = db.query(Email).filter(Email.received_at >= cutoff_24h)
     draft_cnt_query = db.query(Draft)
     if account_id:
         cnt_query = cnt_query.filter(Email.account_id == account_id)
