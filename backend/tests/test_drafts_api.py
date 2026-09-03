@@ -38,9 +38,28 @@ class TestDraftsApi(unittest.TestCase):
         Base.metadata.drop_all(bind=self.engine)
 
     def test_draft_lifecycle(self):
-        # 1. Create a draft
+        # 0. Add prior inbound email to create a true reply thread
+        inbound_msg = Email(
+            account_id=self.account.id,
+            gmail_message_id="msg_inbound_001",
+            gmail_thread_id="demo_thread",
+            sender="Recruiter <recruiter@tech.com>",
+            recipient=self.account.google_email,
+            subject="Interview Schedule",
+            html_body="<p>Are you available for an interview?</p>",
+            received_at=datetime.datetime.now(datetime.timezone.utc),
+            fetched_at=datetime.datetime.now(datetime.timezone.utc),
+            folder_status="inbox"
+        )
+        self.db.add(inbound_msg)
+        self.db.commit()
+        self.db.refresh(inbound_msg)
+
+        # 1. Create a draft replying to inbound_msg
         draft_req = DraftCreate(
             account_id=self.account.id,
+            gmail_thread_id="demo_thread",
+            email_id=inbound_msg.id,
             to_recipients="recruiter@tech.com",
             subject="Re: Interview Schedule",
             html_body="<p>I am available on Monday at 10 AM.</p>",
@@ -120,7 +139,7 @@ class TestDraftsApi(unittest.TestCase):
         )
         self.assertEqual(remaining_drafts.total, 0)
 
-        # Verify sent email appears in Replied folder
+        # Verify sent email appears in Replied folder (returns 2 emails for the 1 thread)
         replied_after = get_emails(
             account_id=self.account.id,
             folder="replied",
@@ -130,7 +149,8 @@ class TestDraftsApi(unittest.TestCase):
             db=self.db,
             current_user=self.current_user
         )
-        self.assertEqual(len(replied_after.items), 1)
+        self.assertEqual(len(replied_after.items), 2)
+        self.assertEqual(replied_after.folder_counts.replied, 1)
 
     def test_discard_draft(self):
         draft_req = DraftCreate(

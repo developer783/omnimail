@@ -7,7 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.config import settings
-from app.database import engine, Base
+from app.database import engine, Base, SessionLocal
+from app.migrations import run_migrations_and_backfill
 from app.routers.auth import router as auth_router
 from app.routers.google_oauth import router as google_oauth_router
 from app.routers.emails import router as emails_router
@@ -25,7 +26,12 @@ logger = logging.getLogger("main")
 # Automatically create database tables on startup with logging verification
 logger.info(f"Connecting to database host: {engine.url.host or 'local'} (database: {engine.url.database})...")
 Base.metadata.create_all(bind=engine)
-logger.info("Successfully connected to PostgreSQL database and verified all database tables!")
+
+# Run schema migrations and data backfill
+with SessionLocal() as db_session:
+    run_migrations_and_backfill(db_session)
+
+logger.info("Successfully connected to database and verified all database tables and migrations!")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

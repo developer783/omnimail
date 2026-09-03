@@ -401,14 +401,29 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                     raw_to = _parse_header(msg_headers, "Cc", default="")
 
                 is_sent_mail = (account.google_email and account.google_email.lower() in raw_from.lower()) or ("SENT" in label_ids and not ("mailer-daemon" in raw_from.lower() or "mail delivery subsystem" in raw_from.lower()))
+                in_reply_to_hdr = _parse_header(msg_headers, "In-Reply-To", default="")
+                references_hdr = _parse_header(msg_headers, "References", default="")
 
                 if is_sent_mail and not ("mailer-daemon" in raw_from.lower() or "mail delivery subsystem" in raw_from.lower()):
                     sender = f"Me <{account.google_email}>"
                     recipient = raw_to if (raw_to and raw_to.strip() and raw_to.strip() not in ["Unknown Recipient", "Recipient"]) else account.google_email
-                    folder_status = "replied"
+                    
+                    # Check if thread contains a prior inbound message in DB or has reply headers
+                    has_prior_inbound = db.query(Email.id).filter(
+                        Email.gmail_thread_id == thread_id,
+                        Email.sender.notilike("Me %")
+                    ).first() is not None
+
+                    if has_prior_inbound or in_reply_to_hdr or references_hdr:
+                        is_reply = True
+                        folder_status = "replied"
+                    else:
+                        is_reply = False
+                        folder_status = "sent"
                 else:
                     sender = raw_from
                     recipient = raw_to if raw_to else account.google_email
+                    is_reply = False
                     folder_status = "inbox"
 
                 subject = _parse_header(msg_headers, "Subject", default="(No Subject)")
@@ -450,6 +465,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                     html_body=html_body,
                     received_at=received_at,
                     fetched_at=datetime.datetime.now(datetime.timezone.utc),
+                    is_reply=is_reply,
                     folder_status=folder_status
                 )
                 db.add(new_email)

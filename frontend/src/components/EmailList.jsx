@@ -43,14 +43,15 @@ export default function EmailList({
     
     emails.forEach(email => {
       const rawThreadId = email.gmail_thread_id && email.gmail_thread_id.trim() ? email.gmail_thread_id.trim() : null;
-      const cleanSubj = email.subject ? email.subject.replace(/^(re|fwd):\s*/i, '').trim().toLowerCase() : '';
+      const cleanSubj = email.subject ? email.subject.replace(/^(re|fwd|fw|reply):\s*/ig, '').replace(/\s+/g, ' ').trim().toLowerCase() : '';
+      const recKey = email.recipient ? email.recipient.replace(/<.*>/, '').trim().toLowerCase() : '';
       
-      const threadKey = rawThreadId || (cleanSubj ? `subj_${email.account_id}_${cleanSubj}` : `single_${email.id}`);
+      const threadKey = rawThreadId || (cleanSubj ? `subj_${email.account_id}_${recKey}_${cleanSubj}` : `single_${email.id}`);
       if (!threadMap.has(threadKey)) {
         threadMap.set(threadKey, []);
       }
       const list = threadMap.get(threadKey);
-      if (!list.some(existing => existing.id === email.id)) {
+      if (!list.some(existing => existing.id === email.id || existing.gmail_message_id === email.gmail_message_id)) {
         list.push(email);
       }
     });
@@ -80,8 +81,8 @@ export default function EmailList({
       const hasInbound = msgList.some(m => m.sender && !m.sender.startsWith('Me ') && !m.sender.toLowerCase().includes('me <'));
       const hasOutbound = msgList.some(m => m.sender && (m.sender.startsWith('Me ') || m.sender.toLowerCase().includes('me <')));
 
-      const hasReplied = (hasInbound && hasOutbound) || msgList.some(m => m.folder_status === 'replied');
-      const isSent = (hasOutbound && !hasInbound) || msgList.some(m => m.folder_status === 'sent');
+      const hasReplied = msgList.some(m => m.is_reply) || (hasInbound && hasOutbound);
+      const isSent = hasOutbound && !hasInbound && !hasReplied;
 
       threads.push({
         threadId: threadKey,

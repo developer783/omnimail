@@ -34,7 +34,8 @@ class Email(Base):
     fetched_at = Column(DateTime(timezone=True), default=datetime.datetime.now(datetime.timezone.utc), nullable=False)
     is_read = Column(Boolean, default=False, nullable=False, index=True)
     is_starred = Column(Boolean, default=False, nullable=False, index=True)
-    folder_status = Column(String(50), default="inbox", nullable=False, index=True) # 'inbox', 'follow_up', 'replied', 'snoozed'
+    is_reply = Column(Boolean, default=False, nullable=False, index=True)
+    folder_status = Column(String(50), default="inbox", nullable=False, index=True) # 'inbox', 'follow_up', 'replied', 'sent', 'snoozed'
 
     __table_args__ = (
         UniqueConstraint("account_id", "gmail_message_id", name="uq_account_gmail_msg"),

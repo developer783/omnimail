@@ -83,13 +83,13 @@ export default function App() {
         
         const tId = updatedSelected.gmail_thread_id && updatedSelected.gmail_thread_id.trim();
         const mId = updatedSelected.gmail_message_id && updatedSelected.gmail_message_id.trim();
-        const cleanSubj = updatedSelected.subject ? updatedSelected.subject.replace(/^(re|fwd):\s*/i, '').trim().toLowerCase() : '';
+        const cleanSubj = updatedSelected.subject ? updatedSelected.subject.replace(/^(re|fwd|fw|reply):\s*/ig, '').replace(/\s+/g, ' ').trim().toLowerCase() : '';
         const rawThreadMsgs = allItems.filter(e => {
           if (tId && e.gmail_thread_id && e.gmail_thread_id.trim() === tId) return true;
           if (mId && (e.gmail_thread_id === mId || e.gmail_message_id === mId)) return true;
           if (cleanSubj && e.subject) {
-            const eSubj = e.subject.replace(/^(re|fwd):\s*/i, '').trim().toLowerCase();
-            if (eSubj && eSubj === cleanSubj) return true;
+            const eSubj = e.subject.replace(/^(re|fwd|fw|reply):\s*/ig, '').replace(/\s+/g, ' ').trim().toLowerCase();
+            if (eSubj && eSubj === cleanSubj && e.account_id === updatedSelected.account_id) return true;
           }
           return e.id === updatedSelected.id;
         });

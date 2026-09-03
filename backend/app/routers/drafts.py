@@ -229,6 +229,8 @@ def send_draft(
         orig_email.gmail_thread_id = target_thread_id
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
+    is_true_reply = bool(orig_email) or bool(draft_obj.composer_mode in ["reply", "reply_all"] and target_thread_id)
+
     sent_email_record = Email(
         account_id=account.id,
         gmail_message_id=sent_gmail_id,
@@ -242,9 +244,10 @@ def send_draft(
         fetched_at=now_utc,
         is_read=True,
         is_starred=False,
-        folder_status="replied"
+        is_reply=is_true_reply,
+        folder_status="replied" if is_true_reply else "sent"
     )
-    if orig_email:
+    if orig_email and is_true_reply:
         orig_email.folder_status = "replied"
 
     db.add(sent_email_record)
@@ -269,6 +272,7 @@ def send_draft(
         fetched_at=sent_email_record.fetched_at,
         is_read=sent_email_record.is_read,
         is_starred=sent_email_record.is_starred,
+        is_reply=sent_email_record.is_reply,
         folder_status=sent_email_record.folder_status,
         attachments=[]
     )

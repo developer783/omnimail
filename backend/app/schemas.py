@@ -54,6 +54,7 @@ class EmailOut(BaseModel):
     fetched_at: datetime.datetime
     is_read: bool = False
     is_starred: bool = False
+    is_reply: bool = False
     folder_status: str = "inbox"
     attachments: List[EmailAttachmentOut] = []
 
