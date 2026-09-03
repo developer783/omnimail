@@ -3,7 +3,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func
 
 from app.database import get_db
@@ -33,7 +33,7 @@ def get_emails(
     Returns emails filtered by folder, account_id, and search query.
     Also returns global folder counts for the sidebar badges.
     """
-    raw_base_query = db.query(Email, ConnectedAccount.google_email).join(
+    raw_base_query = db.query(Email, ConnectedAccount.google_email).options(joinedload(Email.attachments)).join(
         ConnectedAccount, Email.account_id == ConnectedAccount.id
     )
 

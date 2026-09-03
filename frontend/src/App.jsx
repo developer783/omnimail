@@ -214,36 +214,47 @@ export default function App() {
     if (selectedEmail && selectedEmail.id === email.id) {
       setSelectedEmail(prev => ({ ...prev, is_starred: updatedStatus }));
     }
+    setFolderCounts(prev => ({
+      ...prev,
+      starred: Math.max(0, (prev.starred || 0) + (updatedStatus ? 1 : -1))
+    }));
     try {
-      await api.updateEmailStatus(email.id, { is_starred: updatedStatus });
-      await loadData();
+      api.updateEmailStatus(email.id, { is_starred: updatedStatus });
     } catch (err) {
       console.error('Failed to toggle star:', err);
     }
   };
 
   const handleToggleRead = async (email) => {
-    const updatedStatus = !email.is_read;
-    setEmails(prev => prev.map(e => e.id === email.id ? { ...e, is_read: updatedStatus } : e));
+    if (email.is_read) return; // Already read
+    setEmails(prev => prev.map(e => e.id === email.id ? { ...e, is_read: true } : e));
     if (selectedEmail && selectedEmail.id === email.id) {
-      setSelectedEmail(prev => ({ ...prev, is_read: updatedStatus }));
+      setSelectedEmail(prev => ({ ...prev, is_read: true }));
     }
+    setFolderCounts(prev => ({
+      ...prev,
+      unread: Math.max(0, (prev.unread || 0) - 1)
+    }));
     try {
-      await api.updateEmailStatus(email.id, { is_read: updatedStatus });
-      await loadData();
+      api.updateEmailStatus(email.id, { is_read: true });
     } catch (err) {
       console.error('Failed to toggle read:', err);
     }
   };
 
   const handleChangeFolderStatus = async (email, newFolder) => {
+    const oldFolder = email.folder_status;
     setEmails(prev => prev.map(e => e.id === email.id ? { ...e, folder_status: newFolder } : e));
     if (selectedEmail && selectedEmail.id === email.id) {
       setSelectedEmail(prev => ({ ...prev, folder_status: newFolder }));
     }
+    setFolderCounts(prev => ({
+      ...prev,
+      [oldFolder]: Math.max(0, (prev[oldFolder] || 0) - 1),
+      [newFolder]: (prev[newFolder] || 0) + 1
+    }));
     try {
-      await api.updateEmailStatus(email.id, { folder_status: newFolder });
-      await loadData();
+      api.updateEmailStatus(email.id, { folder_status: newFolder });
     } catch (err) {
       console.error('Failed to change folder status:', err);
     }
@@ -368,6 +379,7 @@ export default function App() {
           drafts={drafts}
           selectedEmailId={selectedEmail ? selectedEmail.id : null}
           selectedDraftId={selectedDraft ? selectedDraft.id : null}
+          searchQuery={searchQuery}
           onSelectEmail={(email, threadMsgs) => {
             setSelectedDraft(null);
             setSelectedEmail({ ...email, threadMessages: threadMsgs || [email] });

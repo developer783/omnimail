@@ -7,6 +7,7 @@ export default function EmailList({
   drafts = [],
   selectedEmailId,
   selectedDraftId,
+  searchQuery = '',
   onSelectEmail,
   onSelectDraft,
   activeFolder,
@@ -15,9 +16,19 @@ export default function EmailList({
   onToggleRead
 }) {
   const groupedThreads = React.useMemo(() => {
+    const cleanQ = searchQuery ? searchQuery.trim().toLowerCase() : '';
+
     if (activeFolder === 'drafts') {
       if (!drafts || drafts.length === 0) return [];
-      return drafts.map(draft => ({
+      let list = drafts;
+      if (cleanQ) {
+        list = list.filter(d => 
+          d.subject?.toLowerCase().includes(cleanQ) ||
+          d.to_recipients?.toLowerCase().includes(cleanQ) ||
+          d.html_body?.toLowerCase().includes(cleanQ)
+        );
+      }
+      return list.map(draft => ({
         threadId: `draft_${draft.id}`,
         isDraft: true,
         isSent: false,
@@ -38,10 +49,20 @@ export default function EmailList({
     }
 
     if (!emails || emails.length === 0) return [];
+
+    let targetEmails = emails;
+    if (cleanQ) {
+      targetEmails = targetEmails.filter(e =>
+        e.subject?.toLowerCase().includes(cleanQ) ||
+        e.sender?.toLowerCase().includes(cleanQ) ||
+        e.recipient?.toLowerCase().includes(cleanQ) ||
+        e.html_body?.toLowerCase().includes(cleanQ)
+      );
+    }
     
     const threadMap = new Map();
     
-    emails.forEach(email => {
+    targetEmails.forEach(email => {
       const rawThreadId = email.gmail_thread_id && email.gmail_thread_id.trim() ? email.gmail_thread_id.trim() : null;
       const cleanSubj = email.subject ? email.subject.replace(/^(re|fwd|fw|reply):\s*/ig, '').replace(/\s+/g, ' ').trim().toLowerCase() : '';
       const recKey = email.recipient ? email.recipient.replace(/<.*>/, '').trim().toLowerCase() : '';
@@ -106,7 +127,7 @@ export default function EmailList({
     // Sort threads by latest message timestamp descending
     threads.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
     return threads;
-  }, [emails, drafts, activeFolder]);
+  }, [emails, drafts, activeFolder, searchQuery]);
 
   const formatDateInfo = (dateString) => {
     try {
