@@ -53,6 +53,7 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
     try {
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = msg.html_body;
+      tempDiv.querySelectorAll('style, script').forEach((el) => el.remove());
       const text = tempDiv.textContent || tempDiv.innerText || '';
       return text.replace(/\s+/g, ' ').trim().slice(0, 120);
     } catch (e) {
