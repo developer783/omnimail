@@ -76,9 +76,17 @@ export default function EmailList({
       const cleanAddr = match ? match[1] : rawAddr;
       const extPart = cleanAddr.replace(/<.*>/, '').trim().toLowerCase();
 
-      const threadKey = (normSubj && extPart)
-        ? `thread_${email.account_id}_${extPart}_${normSubj}`
-        : (email.gmail_thread_id && email.gmail_thread_id.trim() ? email.gmail_thread_id.trim() : `single_${email.id}`);
+      // Real Gmail thread IDs are authoritative when present (the backend keeps them in sync
+      // between an original message and its reply), so they take priority. The subject +
+      // counterpart-address match is only a fallback for messages missing a thread id -
+      // otherwise two unrelated conversations that happen to share a similar templated
+      // subject and sender/recipient address (common with recruiter emails) would get
+      // merged into one card, incorrectly marking an unreplied thread as "Replied".
+      const threadKey = (email.gmail_thread_id && email.gmail_thread_id.trim())
+        ? `gtid_${email.account_id}_${email.gmail_thread_id.trim()}`
+        : (normSubj && extPart)
+          ? `thread_${email.account_id}_${extPart}_${normSubj}`
+          : `single_${email.id}`;
 
       if (!threadMap.has(threadKey)) {
         threadMap.set(threadKey, []);

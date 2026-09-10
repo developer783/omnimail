@@ -109,9 +109,16 @@ export default function App() {
           const eMatch = eRawAddr.match(/<([^>]+)>/);
           const eExtPart = (eMatch ? eMatch[1] : eRawAddr).replace(/<.*>/, '').trim().toLowerCase();
 
-          if (normSubj && selExtPart && eSubj === normSubj && eExtPart === selExtPart) return true;
           if (tId && e.gmail_thread_id && e.gmail_thread_id.trim() === tId) return true;
           if (mId && (e.gmail_thread_id === mId || e.gmail_message_id === mId)) return true;
+
+          // Subject + counterpart-address match is only a fallback for messages missing a
+          // real Gmail thread id. If both sides already carry distinct real thread ids,
+          // trust Gmail's own distinction rather than merging unrelated conversations that
+          // happen to share a similar templated subject and address.
+          const eTid = e.gmail_thread_id && e.gmail_thread_id.trim();
+          if (normSubj && selExtPart && eSubj === normSubj && eExtPart === selExtPart && (!tId || !eTid)) return true;
+
           return e.id === updatedSelected.id;
         });
 

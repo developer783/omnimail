@@ -51,8 +51,16 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
   const bodySnippet = React.useMemo(() => {
     if (!msg.html_body) return '';
     try {
+      // Strip <style>/<script> blocks and comments before DOM parsing as a safety net for
+      // malformed markup (e.g. unclosed tags) that can prevent the browser from recognizing
+      // them as real elements, which would otherwise let their raw CSS/JS text leak through.
+      const cleanedSource = msg.html_body
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<!--[\s\S]*?-->/g, ' ');
+
       const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = msg.html_body;
+      tempDiv.innerHTML = cleanedSource;
       tempDiv.querySelectorAll('style, script').forEach((el) => el.remove());
       const text = tempDiv.textContent || tempDiv.innerText || '';
       return text.replace(/\s+/g, ' ').trim().slice(0, 120);
@@ -281,6 +289,7 @@ export default function EmailDetail({
   const [bodyText, setBodyText] = useState('');
   const [attachments, setAttachments] = useState([]);
   const [isSending, setIsSending] = useState(false);
+  const isSendingRef = useRef(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [draftSavedToast, setDraftSavedToast] = useState(false);
 
@@ -600,7 +609,11 @@ export default function EmailDetail({
   };
 
   const handleSend = async () => {
-    if (isSending) return;
+    // Use a ref (not just state) as the guard: state updates are asynchronous, so two
+    // near-simultaneous triggers (e.g. a click and a keyboard shortcut) could both read a
+    // stale `isSending === false` before the first render flushes. The ref updates instantly.
+    if (isSendingRef.current) return;
+    isSendingRef.current = true;
     let contentHtml = editorRef.current ? editorRef.current.innerHTML : bodyText;
     if (isPlainTextMode && editorRef.current) {
       contentHtml = `<pre style="font-family: monospace; white-space: pre-wrap;">${editorRef.current.innerText}</pre>`;
@@ -608,6 +621,7 @@ export default function EmailDetail({
 
     if (!contentHtml.trim() || contentHtml === '<br>') {
       setErrorMsg('Please write a message before sending.');
+      isSendingRef.current = false;
       return;
     }
 
@@ -621,6 +635,7 @@ export default function EmailDetail({
         if (!toField.trim()) {
           setErrorMsg('Please enter a recipient email address to forward.');
           setIsSending(false);
+          isSendingRef.current = false;
           return;
         }
         await api.forwardEmail(email.id, {
@@ -645,6 +660,7 @@ export default function EmailDetail({
       setErrorMsg(err.message || 'Failed to send email reply');
     } finally {
       setIsSending(false);
+      isSendingRef.current = false;
     }
   };
 

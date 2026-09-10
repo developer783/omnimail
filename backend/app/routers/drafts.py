@@ -175,35 +175,43 @@ def send_draft(
     current_user: dict = Depends(verify_jwt_token)
 ):
     """Sends draft via Gmail API, creates sent Email record, and deletes draft row."""
-    res = db.query(Draft, ConnectedAccount).join(
-        ConnectedAccount, Draft.account_id == ConnectedAccount.id
-    ).filter(Draft.id == draft_id).first()
+    # Row-lock the draft so a concurrent duplicate submit (e.g. a double-click) blocks here
+    # instead of racing ahead and sending the same message twice via the Gmail API.
+    draft_obj = db.query(Draft).filter(Draft.id == draft_id).with_for_update().first()
 
-    if not res:
+    if not draft_obj:
         raise HTTPException(status_code=404, detail="Draft not found")
 
-    draft_obj, account = res
+    account = db.query(ConnectedAccount).filter(ConnectedAccount.id == draft_obj.account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Connected account not found")
 
     if not draft_obj.to_recipients or not draft_obj.to_recipients.strip():
         raise HTTPException(status_code=400, detail="Cannot send draft without a recipient email address.")
 
     clean_subj = draft_obj.subject or "No Subject"
     body_html = draft_obj.html_body or ""
+    to_recipients = draft_obj.to_recipients
+    cc = draft_obj.cc
+    bcc = draft_obj.bcc
+    gmail_thread_id = draft_obj.gmail_thread_id
+    composer_mode = draft_obj.composer_mode
+    email_id = draft_obj.email_id
 
     msg = MIMEMultipart("alternative")
     msg["From"] = account.google_email
-    msg["To"] = draft_obj.to_recipients
-    if draft_obj.cc:
-        msg["Cc"] = draft_obj.cc
-    if draft_obj.bcc:
-        msg["Bcc"] = draft_obj.bcc
+    msg["To"] = to_recipients
+    if cc:
+        msg["Cc"] = cc
+    if bcc:
+        msg["Bcc"] = bcc
 
     msg["Subject"] = clean_subj
 
     # If linked to original email, set threading headers
     orig_email = None
-    if draft_obj.email_id:
-        orig_email = db.query(Email).filter(Email.id == draft_obj.email_id).first()
+    if email_id:
+        orig_email = db.query(Email).filter(Email.id == email_id).first()
 
     if orig_email:
         orig_msg_id = orig_email.message_id_header or f"<{orig_email.gmail_message_id}@mail.gmail.com>"
@@ -212,15 +220,21 @@ def send_draft(
 
     msg.attach(MIMEText(body_html, "html", "utf-8"))
 
+    # Delete (and commit) the draft BEFORE calling the Gmail API. This releases the row lock
+    # by removing the row entirely, so a concurrent duplicate request's lookup above will find
+    # nothing and 404 instead of also sending, guaranteeing at-most-once delivery per draft.
+    db.delete(draft_obj)
+    db.commit()
+
     sent_result = send_gmail_mime_message(
         db=db,
         account=account,
         raw_mime_bytes=msg.as_bytes(),
-        thread_id=draft_obj.gmail_thread_id
+        thread_id=gmail_thread_id
     )
 
     sent_gmail_id = sent_result.get("id", f"sent_{int(datetime.datetime.utcnow().timestamp())}")
-    target_thread_id = (draft_obj.gmail_thread_id or
+    target_thread_id = (gmail_thread_id or
                         (orig_email.gmail_thread_id if orig_email else None) or
                         sent_result.get("threadId") or
                         sent_gmail_id)
@@ -229,7 +243,7 @@ def send_draft(
         orig_email.gmail_thread_id = target_thread_id
 
     now_utc = datetime.datetime.now(datetime.timezone.utc)
-    is_true_reply = bool(orig_email) or bool(draft_obj.composer_mode in ["reply", "reply_all"] and target_thread_id)
+    is_true_reply = bool(orig_email) or bool(composer_mode in ["reply", "reply_all"] and target_thread_id)
 
     sent_email_record = Email(
         account_id=account.id,
@@ -237,7 +251,7 @@ def send_draft(
         gmail_thread_id=target_thread_id,
         message_id_header=f"<{sent_gmail_id}@mail.gmail.com>",
         sender=f"Me <{account.google_email}>",
-        recipient=draft_obj.to_recipients,
+        recipient=to_recipients,
         subject=clean_subj,
         html_body=body_html,
         received_at=now_utc,
@@ -251,9 +265,6 @@ def send_draft(
         orig_email.folder_status = "replied"
 
     db.add(sent_email_record)
-
-    # Delete draft row
-    db.delete(draft_obj)
     db.commit()
     db.refresh(sent_email_record)
 
