@@ -135,11 +135,12 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
     formattedDate = format(new Date(dateStr), 'EEEE, MMMM d, yyyy @ h:mm a');
   } catch (e) {}
 
-  const isSentByMe = msg.sender.toLowerCase().includes('me <') ||
-                     msg.sender.startsWith('Me ') ||
-                     (msg.account_email && msg.sender.toLowerCase().includes(msg.account_email.toLowerCase()));
+  const msgSender = msg.sender || '';
+  const isSentByMe = msgSender.toLowerCase().includes('me <') ||
+                     msgSender.startsWith('Me ') ||
+                     (msg.account_email && msgSender.toLowerCase().includes(msg.account_email.toLowerCase()));
 
-  const senderDisplayName = isSentByMe ? `Me <${msg.account_email || 'You'}>` : msg.sender;
+  const senderDisplayName = isSentByMe ? `Me <${msg.account_email || 'You'}>` : (msgSender || 'Unknown');
 
   return (
     <div style={{
@@ -219,7 +220,7 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
                 onLoad={handleIframeLoad}
                 onError={(err) => console.error(`[EmailDetail Error] Iframe load error for msg ${msg.id}:`, err)}
                 style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
-                sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+                sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
               />
             ) : (
               <div style={{ padding: '16px 20px', color: '#94a3b8', fontStyle: 'italic', fontSize: '13px' }}>
@@ -452,6 +453,34 @@ export default function EmailDetail({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [composerMode, isSending, toField, ccField, bccField, bodyText]);
 
+  const activeEmailObj = React.useMemo(() => email || (activeDraft ? {
+    id: activeDraft.email_id || -1,
+    sender: activeDraft.to_recipients || 'Draft',
+    subject: activeDraft.subject || '(Draft No Subject)',
+    account_email: activeDraft.account_email || '',
+    received_at: activeDraft.updated_at || new Date().toISOString(),
+    is_starred: false,
+    is_read: true,
+    folder_status: 'draft',
+    html_body: activeDraft.html_body || ''
+  } : null), [email, activeDraft]);
+
+  const uniqueMessages = React.useMemo(() => {
+    if (!activeEmailObj) return [];
+    const rawMsgs = (activeEmailObj.threadMessages && activeEmailObj.threadMessages.length > 0)
+      ? activeEmailObj.threadMessages
+      : [activeEmailObj];
+    const seen = new Set();
+    const result = [];
+    rawMsgs.forEach(m => {
+      if (m && m.id && !seen.has(m.id)) {
+        seen.add(m.id);
+        result.push(m);
+      }
+    });
+    return result.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
+  }, [activeEmailObj]);
+
   if (!email && !activeDraft) {
     return (
       <div className="email-detail-pane">
@@ -468,17 +497,18 @@ export default function EmailDetail({
     );
   }
 
-  const activeEmailObj = email || {
-    id: activeDraft?.email_id || -1,
-    sender: activeDraft?.to_recipients || 'Draft',
-    subject: activeDraft?.subject || '(Draft No Subject)',
-    account_email: activeDraft?.account_email || '',
-    received_at: activeDraft?.updated_at || new Date().toISOString(),
-    is_starred: false,
-    is_read: true,
-    folder_status: 'draft',
-    html_body: activeDraft?.html_body || ''
-  };
+  let formattedDate = activeEmailObj.received_at;
+  try {
+    let dateStr = activeEmailObj.received_at;
+    if (typeof dateStr === 'string' && !dateStr.endsWith('Z') && !dateStr.includes('+')) {
+      dateStr = dateStr + 'Z';
+    }
+    formattedDate = format(new Date(dateStr), 'EEEE, MMMM d, yyyy @ h:mm a');
+  } catch (e) {
+    // Keep raw date string
+  }
+
+  const gmailDeepLink = `https://mail.google.com/mail/?authuser=${encodeURIComponent(activeEmailObj.account_email || '')}#inbox/${activeEmailObj.gmail_message_id || ''}`;
 
   const handleStartReply = (mode) => {
     setComposerMode(mode);
@@ -672,42 +702,27 @@ export default function EmailDetail({
 
   const popularEmojis = ['😊', '👍', '❤️', '🎉', '🔥', '🚀', '🙏', '💡', '✅', '👏'];
 
-  const uniqueMessages = React.useMemo(() => {
-    const rawMsgs = (email.threadMessages && email.threadMessages.length > 0)
-      ? email.threadMessages
-      : [email];
-    const seen = new Set();
-    const result = [];
-    rawMsgs.forEach(m => {
-      if (m && m.id && !seen.has(m.id)) {
-        seen.add(m.id);
-        result.push(m);
-      }
-    });
-    return result.sort((a, b) => new Date(a.received_at) - new Date(b.received_at));
-  }, [email]);
-
   return (
     <div className="email-detail-pane">
       {/* Thread Action Header */}
       <div className="email-detail-top-actions">
         <div className="action-buttons-group">
           <button
-            className={`btn-action ${email.is_starred ? 'active-star' : ''}`}
-            onClick={() => onToggleStar(email)}
-            title={email.is_starred ? 'Unstar Message' : 'Star Message'}
+            className={`btn-action ${activeEmailObj.is_starred ? 'active-star' : ''}`}
+            onClick={() => onToggleStar(activeEmailObj)}
+            title={activeEmailObj.is_starred ? 'Unstar Message' : 'Star Message'}
           >
-            <Star size={16} fill={email.is_starred ? '#f59e0b' : 'none'} color={email.is_starred ? '#f59e0b' : 'currentColor'} />
-            <span>{email.is_starred ? 'Starred' : 'Star'}</span>
+            <Star size={16} fill={activeEmailObj.is_starred ? '#f59e0b' : 'none'} color={activeEmailObj.is_starred ? '#f59e0b' : 'currentColor'} />
+            <span>{activeEmailObj.is_starred ? 'Starred' : 'Star'}</span>
           </button>
 
           <button
             className="btn-action"
-            onClick={() => onToggleRead(email)}
-            title={email.is_read ? 'Mark as Unread' : 'Mark as Read'}
+            onClick={() => onToggleRead(activeEmailObj)}
+            title={activeEmailObj.is_read ? 'Mark as Unread' : 'Mark as Read'}
           >
-            {email.is_read ? <EyeOff size={16} /> : <Eye size={16} />}
-            <span>{email.is_read ? 'Mark Unread' : 'Mark Read'}</span>
+            {activeEmailObj.is_read ? <EyeOff size={16} /> : <Eye size={16} />}
+            <span>{activeEmailObj.is_read ? 'Mark Unread' : 'Mark Read'}</span>
           </button>
 
           <div className="divider-vertical" />
@@ -729,8 +744,8 @@ export default function EmailDetail({
 
           {/* Folder Tagging Buttons */}
           <button
-            className={`btn-action ${email.folder_status === 'follow_up' ? 'active-folder' : ''}`}
-            onClick={() => onChangeFolderStatus(email, email.folder_status === 'follow_up' ? 'inbox' : 'follow_up')}
+            className={`btn-action ${activeEmailObj.folder_status === 'follow_up' ? 'active-folder' : ''}`}
+            onClick={() => onChangeFolderStatus(activeEmailObj, activeEmailObj.folder_status === 'follow_up' ? 'inbox' : 'follow_up')}
             title="Toggle Follow Up"
           >
             <Bookmark size={16} />
@@ -738,8 +753,8 @@ export default function EmailDetail({
           </button>
 
           <button
-            className={`btn-action ${email.folder_status === 'replied' ? 'active-folder' : ''}`}
-            onClick={() => onChangeFolderStatus(email, email.folder_status === 'replied' ? 'inbox' : 'replied')}
+            className={`btn-action ${activeEmailObj.folder_status === 'replied' ? 'active-folder' : ''}`}
+            onClick={() => onChangeFolderStatus(activeEmailObj, activeEmailObj.folder_status === 'replied' ? 'inbox' : 'replied')}
             title="Toggle Replied"
           >
             <CheckCheck size={16} />
@@ -747,8 +762,8 @@ export default function EmailDetail({
           </button>
 
           <button
-            className={`btn-action ${email.folder_status === 'snoozed' ? 'active-folder' : ''}`}
-            onClick={() => onChangeFolderStatus(email, email.folder_status === 'snoozed' ? 'inbox' : 'snoozed')}
+            className={`btn-action ${activeEmailObj.folder_status === 'snoozed' ? 'active-folder' : ''}`}
+            onClick={() => onChangeFolderStatus(activeEmailObj, activeEmailObj.folder_status === 'snoozed' ? 'inbox' : 'snoozed')}
             title="Toggle Snoozed"
           >
             <Clock size={16} />
@@ -759,12 +774,12 @@ export default function EmailDetail({
 
       {/* Header Info */}
       <div className="email-detail-header">
-        <h2 className="email-detail-subject">{email.subject || '(No Subject)'}</h2>
+        <h2 className="email-detail-subject">{activeEmailObj.subject || '(No Subject)'}</h2>
 
         <div className="email-meta-row">
           <div className="email-meta-left">
             <span className="account-source">
-              Thread in <strong>{email.account_email}</strong> ({uniqueMessages.length} message{uniqueMessages.length === 1 ? '' : 's'})
+              Thread in <strong>{activeEmailObj.account_email}</strong> ({uniqueMessages.length} message{uniqueMessages.length === 1 ? '' : 's'})
             </span>
           </div>
           <div className="email-meta-right">
@@ -862,8 +877,8 @@ export default function EmailDetail({
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: 700, color: '#0f172a' }}>
                 {composerMode === 'forward' ? <Forward size={16} color="#4f46e5" /> : <Reply size={16} color="#4f46e5" />}
                 <span>
-                  {composerMode === 'reply' && `Replying to ${email.sender}`}
-                  {composerMode === 'reply_all' && `Replying All to ${email.sender}`}
+                  {composerMode === 'reply' && `Replying to ${activeEmailObj.sender}`}
+                  {composerMode === 'reply_all' && `Replying All to ${activeEmailObj.sender}`}
                   {composerMode === 'forward' && 'Forwarding Message'}
                 </span>
                 {draftSavedToast && (
@@ -1001,13 +1016,13 @@ export default function EmailDetail({
                   onClick={() => setIsQuotedCollapsed(!isQuotedCollapsed)}
                   style={{ padding: '8px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: '#64748b', fontWeight: 600 }}
                 >
-                  <span>On {formattedDate}, {email.sender} wrote:</span>
+                  <span>On {formattedDate}, {activeEmailObj.sender} wrote:</span>
                   {isQuotedCollapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
                 </div>
 
                 {!isQuotedCollapsed && (
                   <div style={{ padding: '12px 16px', fontSize: '12px', color: '#475569', borderTop: '1px solid var(--border-color)', maxHeight: '160px', overflowY: 'auto' }}>
-                    <div dangerouslySetInnerHTML={{ __html: email.html_body }} />
+                    <div dangerouslySetInnerHTML={{ __html: activeEmailObj.html_body }} />
                   </div>
                 )}
               </div>
