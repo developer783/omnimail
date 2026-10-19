@@ -18,14 +18,16 @@ class Settings(BaseSettings):
     TOKEN_ENCRYPTION_KEY: str = os.getenv("TOKEN_ENCRYPTION_KEY") or Fernet.generate_key().decode()
 
     # Database configuration
-    # Render provides postgres:// which SQLAlchemy 2.0 requires as postgresql://
+    # Render provides postgres:// (or a URL with an explicit driver); normalize every Postgres
+    # URL to the psycopg (v3) driver, which is the one installed via requirements.txt.
     _raw_db_url: str = os.getenv("DATABASE_URL") or "postgresql://omnimail:omnimail_password@localhost:5432/omnimail"
-    
+
     @property
     def DATABASE_URL(self) -> str:
         url = self._raw_db_url
-        if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql://", 1)
+        for prefix in ("postgres://", "postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url[len(prefix):]
         return url
 
     # Google OAuth settings
