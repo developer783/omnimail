@@ -10,7 +10,7 @@ from sqlalchemy import func
 
 from app.config import settings
 from app.database import get_db
-from app.models import ConnectedAccount, Email
+from app.models import ConnectedAccount, Email, Draft
 from app.schemas import ConnectedAccountOut
 from app.security import encrypt_token, decrypt_token, verify_jwt_token
 from app.gmail_service import fetch_and_store_emails_for_account
@@ -32,7 +32,8 @@ GMAIL_SCOPES = "https://www.googleapis.com/auth/userinfo.email https://www.googl
 @router.get("/auth/google/start")
 def google_oauth_start(
     json_mode: bool = Query(False, alias="json"),
-    state: Optional[str] = Query("add_account")
+    state: Optional[str] = Query("add_account"),
+    login_hint: Optional[str] = Query(None)
 ):
     """
     Redirects user to Google OAuth 2.0 consent screen.
@@ -53,6 +54,9 @@ def google_oauth_start(
         "prompt": "select_account consent",
         "state": state or "add_account"
     }
+    # When re-authenticating ("Fix") an existing account, pre-select it in Google's account chooser
+    if login_hint:
+        params["login_hint"] = login_hint
     
     auth_url = f"{GOOGLE_AUTH_BASE}?{urllib.parse.urlencode(params)}"
 
@@ -223,9 +227,16 @@ def delete_connected_account(
 
     email = account.google_email
 
-    raw_refresh_token = decrypt_token(account.refresh_token) if account.refresh_token else ""
-    raw_access_token = decrypt_token(account.access_token) if account.access_token else ""
-    token_to_revoke = raw_refresh_token or raw_access_token
+    # Token revocation is best-effort: a logged-out/broken account may hold tokens that can no
+    # longer be decrypted or are already invalid, and that must not block removing the account.
+    token_to_revoke = ""
+    for stored in (account.refresh_token, account.access_token):
+        try:
+            token_to_revoke = decrypt_token(stored) if stored else ""
+        except Exception:
+            token_to_revoke = ""
+        if token_to_revoke:
+            break
 
     if token_to_revoke and not token_to_revoke.startswith("demo_"):
         try:
@@ -238,6 +249,8 @@ def delete_connected_account(
         except Exception:
             pass
 
+    # Drafts have no ORM cascade from the account, so remove them explicitly
+    db.query(Draft).filter(Draft.account_id == account.id).delete(synchronize_session=False)
     db.delete(account)
     db.commit()
 

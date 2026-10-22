@@ -41,9 +41,9 @@ export default function Sidebar({
   const [newKeyword, setNewKeyword] = useState('');
   const [newField, setNewField] = useState('any');
 
-  const handleAddAccount = async () => {
+  const handleAddAccount = async (loginHint = null) => {
     try {
-      const url = await api.getGoogleOAuthUrl();
+      const url = await api.getGoogleOAuthUrl(loginHint);
       window.location.href = url;
     } catch (err) {
       alert(`Failed to start Google OAuth flow: ${err.message}`);
@@ -115,7 +115,7 @@ export default function Sidebar({
             </span>
             <button
               className="btn-text-add"
-              onClick={handleAddAccount}
+              onClick={() => handleAddAccount()}
               title="Add Google Account"
             >
               <Plus size={14} /> Add
@@ -187,20 +187,32 @@ export default function Sidebar({
                     )}
 
                     {isNeedsReauth ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAddAccount();
-                        }}
-                        style={{ padding: '2px 6px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', color: '#dc2626', fontSize: '10.5px', fontWeight: 700, cursor: 'pointer' }}
-                        title={acc.error_message || 'Click to re-authenticate account'}
-                      >
-                        Fix
-                      </button>
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAddAccount(acc.google_email);
+                          }}
+                          style={{ padding: '2px 6px', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: '4px', color: '#4338ca', fontSize: '10.5px', fontWeight: 700, cursor: 'pointer' }}
+                          title={`Sign in to Google again to reconnect ${acc.google_email}${acc.error_message ? ` (${acc.error_message})` : ''}`}
+                        >
+                          Fix
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRequestDisconnect(acc);
+                          }}
+                          style={{ padding: '2px 6px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', color: '#dc2626', fontSize: '10.5px', fontWeight: 700, cursor: 'pointer' }}
+                          title={`Remove ${acc.google_email} and all its emails from the dashboard`}
+                        >
+                          Remove
+                        </button>
+                      </>
                     ) : (
                       <button
                         className="btn-disconnect-hover"
-                        title="Disconnect Account"
+                        title="Remove Account"
                         onClick={(e) => {
                           e.stopPropagation();
                           onRequestDisconnect(acc);

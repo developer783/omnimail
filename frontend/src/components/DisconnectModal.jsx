@@ -10,7 +10,7 @@ export default function DisconnectModal({ account, isOpen, onClose, onConfirm, i
         <div className="modal-header">
           <div className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--accent-danger)' }}>
             <AlertTriangle size={20} />
-            Confirm Account Disconnect
+            Remove Account
           </div>
           <button className="btn-icon" onClick={onClose} disabled={isDeleting}>
             <X size={18} />
@@ -18,7 +18,7 @@ export default function DisconnectModal({ account, isOpen, onClose, onConfirm, i
         </div>
 
         <div style={{ fontSize: '14px', lineHeight: '1.6', color: 'var(--text-secondary)' }}>
-          This will revoke Google OAuth credentials and remove <strong style={{ color: 'var(--text-primary)' }}>{account.google_email}</strong> and <strong>all its synced emails</strong> from the dashboard for everyone.
+          This will disconnect Google access and permanently remove <strong style={{ color: 'var(--text-primary)' }}>{account.google_email}</strong> and <strong>all its synced emails and drafts</strong> from the dashboard for everyone.
           <br /><br />
           <span style={{ fontSize: '13px', color: '#fca5a5' }}>
             ⚠️ This operation is permanent. Re-connecting the account later starts fresh.
@@ -35,10 +35,10 @@ export default function DisconnectModal({ account, isOpen, onClose, onConfirm, i
             disabled={isDeleting}
           >
             {isDeleting ? (
-              'Revoking & Deleting...'
+              'Removing...'
             ) : (
               <>
-                <Trash2 size={16} /> Disconnect Account
+                <Trash2 size={16} /> Remove Account
               </>
             )}
           </button>

@@ -70,8 +70,10 @@ export const api = {
   deleteAccount: (accountId) =>
     request(`/accounts/${accountId}`, { method: 'DELETE' }),
 
-  getGoogleOAuthUrl: async () => {
-    const data = await request('/auth/google/start?json=true');
+  getGoogleOAuthUrl: async (loginHint = null) => {
+    const params = new URLSearchParams({ json: 'true' });
+    if (loginHint) params.append('login_hint', loginHint);
+    const data = await request(`/auth/google/start?${params.toString()}`);
     return data.url;
   },
 
