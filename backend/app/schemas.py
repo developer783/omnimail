@@ -49,7 +49,9 @@ class EmailOut(BaseModel):
     sender: str
     recipient: Optional[str] = None
     subject: str
-    html_body: str
+    # Omitted (None) in list responses to keep payloads small; fetch GET /emails/{id} for the body
+    html_body: Optional[str] = None
+    snippet: Optional[str] = None
     received_at: datetime.datetime
     fetched_at: datetime.datetime
     is_read: bool = False

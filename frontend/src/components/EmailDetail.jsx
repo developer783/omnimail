@@ -43,18 +43,67 @@ import {
 import { format } from 'date-fns';
 import { api } from '../api';
 
+// The inbox list only carries short snippets; full bodies are fetched per message when opened
+// and kept in a small cache so re-opening a thread doesn't refetch them.
+const BODY_CACHE_LIMIT = 30;
+const bodyCache = new Map();
+
+function useEmailBody(msg, enabled) {
+  const hasOwnBody = !!(msg && msg.html_body);
+  const canFetch = !!(msg && msg.id > 0);
+  const [body, setBody] = useState(() =>
+    hasOwnBody ? msg.html_body : (canFetch ? bodyCache.get(msg.id) ?? null : '')
+  );
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (hasOwnBody) {
+      setBody(msg.html_body);
+      return;
+    }
+    if (!enabled || !canFetch) return;
+    if (bodyCache.has(msg.id)) {
+      setBody(bodyCache.get(msg.id));
+      return;
+    }
+    let cancelled = false;
+    setIsLoading(true);
+    api.getEmailById(msg.id)
+      .then((full) => {
+        const html = full.html_body || '';
+        bodyCache.set(msg.id, html);
+        if (bodyCache.size > BODY_CACHE_LIMIT) {
+          bodyCache.delete(bodyCache.keys().next().value);
+        }
+        if (!cancelled) setBody(html);
+      })
+      .catch((err) => {
+        console.error(`[EmailDetail] Failed to load body for msg ${msg.id}:`, err);
+        if (!cancelled) setBody('');
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [msg?.id, hasOwnBody, enabled]);
+
+  return { body, isLoading };
+}
+
 function ThreadMessageItem({ msg, defaultExpanded = true }) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const iframeRef = useRef(null);
   const [iframeHeight, setIframeHeight] = useState('350px');
+  const { body: htmlBody, isLoading: isBodyLoading } = useEmailBody(msg, isExpanded);
 
   const bodySnippet = React.useMemo(() => {
-    if (!msg.html_body) return '';
+    if (msg.snippet) return msg.snippet.slice(0, 120);
+    if (!htmlBody) return '';
     try {
       // Strip <style>/<script> blocks and comments before DOM parsing as a safety net for
       // malformed markup (e.g. unclosed tags) that can prevent the browser from recognizing
       // them as real elements, which would otherwise let their raw CSS/JS text leak through.
-      const cleanedSource = msg.html_body
+      const cleanedSource = htmlBody
         .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
         .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
         .replace(/<!--[\s\S]*?-->/g, ' ');
@@ -67,7 +116,7 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
     } catch (e) {
       return '';
     }
-  }, [msg.html_body]);
+  }, [msg.snippet, htmlBody]);
 
   const updateIframeHeight = () => {
     try {
@@ -122,7 +171,7 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
       const timer = setTimeout(() => updateIframeHeight(), 150);
       return () => clearTimeout(timer);
     }
-  }, [isExpanded, msg.id, msg.html_body]);
+  }, [isExpanded, msg.id, htmlBody]);
 
   const senderInitial = (msg.sender || 'U').replace(/<.*>/, '').trim().charAt(0).toUpperCase() || 'U';
   
@@ -211,12 +260,16 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
       {isExpanded && (
         <>
           <div className="iframe-container" style={{ padding: '8px 0', minHeight: '150px' }}>
-            {msg.html_body && msg.html_body.trim() ? (
+            {isBodyLoading || htmlBody === null ? (
+              <div style={{ padding: '16px 20px', color: '#94a3b8', fontSize: '13px' }}>
+                Loading message…
+              </div>
+            ) : htmlBody && htmlBody.trim() ? (
               <iframe
                 ref={iframeRef}
                 title={`Email Message ${msg.id}`}
                 className="email-iframe"
-                srcDoc={msg.html_body}
+                srcDoc={htmlBody}
                 onLoad={handleIframeLoad}
                 onError={(err) => console.error(`[EmailDetail Error] Iframe load error for msg ${msg.id}:`, err)}
                 style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
@@ -259,6 +312,11 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
       )}
     </div>
   );
+}
+
+function QuotedBody({ msg }) {
+  const { body } = useEmailBody(msg, true);
+  return <div dangerouslySetInnerHTML={{ __html: body || '' }} />;
 }
 
 export default function EmailDetail({
@@ -418,13 +476,16 @@ export default function EmailDetail({
             html_body: currentHtml,
             composer_mode: composerMode
           });
+          const isNewDraft = draftRes && draftRes.id && draftRes.id !== activeDraftId;
           if (draftRes && draftRes.id) {
             setActiveDraftId(draftRes.id);
           }
           setDraftSavedToast(true);
           if (toastTimeout) clearTimeout(toastTimeout);
           toastTimeout = setTimeout(() => setDraftSavedToast(false), 2000);
-          if (onRefresh) onRefresh();
+          // Reload the dashboard only when the draft is first created (so it appears in Drafts),
+          // not on every 3-second autosave, which re-requested the whole inbox continuously.
+          if (isNewDraft && onRefresh) onRefresh();
         } catch (e) {
           console.error("Autosave draft error:", e);
         }
@@ -1022,7 +1083,7 @@ export default function EmailDetail({
 
                 {!isQuotedCollapsed && (
                   <div style={{ padding: '12px 16px', fontSize: '12px', color: '#475569', borderTop: '1px solid var(--border-color)', maxHeight: '160px', overflowY: 'auto' }}>
-                    <div dangerouslySetInnerHTML={{ __html: activeEmailObj.html_body }} />
+                    <QuotedBody msg={activeEmailObj} />
                   </div>
                 )}
               </div>

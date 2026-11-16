@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/auth/google/callback")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+    # Memory / storage limits (sized for a 512 MB instance and a small Postgres database)
+    # Sent/replied messages are kept past the 24h inbound window only as thread context for this long.
+    OUTBOUND_RETENTION_DAYS: int = int(os.getenv("OUTBOUND_RETENTION_DAYS", "7"))
+    # Messages fetched per account per sync, and how many are committed to the DB at a time.
+    SYNC_MAX_RESULTS: int = int(os.getenv("SYNC_MAX_RESULTS", "50"))
+    SYNC_COMMIT_BATCH: int = int(os.getenv("SYNC_COMMIT_BATCH", "10"))
+    # How often all accounts are synced, and how many accounts are synced at the same time.
+    SYNC_INTERVAL_MINUTES: int = int(os.getenv("SYNC_INTERVAL_MINUTES", "2"))
+    SYNC_CONCURRENCY: int = int(os.getenv("SYNC_CONCURRENCY", "4"))
+    # Bodies above this size get their embedded data: URIs stripped before being stored.
+    MAX_STORED_BODY_BYTES: int = int(os.getenv("MAX_STORED_BODY_BYTES", str(1024 * 1024)))
+
     class Config:
         env_file = ".env"
         extra = "ignore"

@@ -189,6 +189,22 @@ export default function App() {
     };
   }, [loadData, isAuthenticated]);
 
+  // Poll for new mail while the dashboard is visible; the server syncs Gmail in the background,
+  // but without this the list only updated when the user happened to click something.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const POLL_MS = 60 * 1000;
+    const tick = () => {
+      if (document.visibilityState === 'visible') loadData();
+    };
+    const timer = setInterval(tick, POLL_MS);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [loadData, isAuthenticated]);
+
   // 4. Action Handlers
   const handleSync = async () => {
     setIsSyncing(true);
@@ -198,7 +214,10 @@ export default function App() {
         type: result.status === 'error' ? 'error' : 'success',
         text: result.message
       });
+      // The sync runs in the background on the server; pick up its results as they land.
       await loadData();
+      setTimeout(loadData, 10 * 1000);
+      setTimeout(loadData, 30 * 1000);
     } catch (err) {
       setNotification({ type: 'error', text: `Sync failed: ${err.message}` });
     } finally {

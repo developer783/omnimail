@@ -3,7 +3,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
-from sqlalchemy.orm import Session, joinedload
+import urllib.parse
+from sqlalchemy.orm import Session, joinedload, defer
 from sqlalchemy import desc, func
 
 from app.database import get_db
@@ -14,6 +15,7 @@ from app.schemas import (
 )
 from app.security import verify_jwt_token
 from app.gmail_service import fetch_and_store_emails_for_account, send_gmail_mime_message, download_attachment_data
+from app.scheduler import trigger_sync_in_background
 from app.routers.google_oauth import list_connected_accounts
 
 router = APIRouter(prefix="/emails", tags=["Emails"])
@@ -23,7 +25,7 @@ def get_emails(
     account_id: Optional[int] = Query(None, description="Filter by connected account ID"),
     folder: Optional[str] = Query("inbox", description="Folder filter: inbox, unread, starred, follow_up, replied, snoozed, or all"),
     q: Optional[str] = Query(None, description="Search term for subject, sender, or keywords"),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: dict = Depends(verify_jwt_token)
@@ -33,7 +35,12 @@ def get_emails(
     Returns emails filtered by folder, account_id, and search query.
     Also returns global folder counts for the sidebar badges.
     """
-    raw_base_query = db.query(Email, ConnectedAccount.google_email).options(joinedload(Email.attachments)).join(
+    # html_body is deferred: list responses carry only a short snippet, and the client loads a
+    # message's body via GET /emails/{id} when it is opened. Loading every body here (inline
+    # images included) is what made this endpoint the app's largest memory consumer.
+    raw_base_query = db.query(Email, ConnectedAccount.google_email).options(
+        joinedload(Email.attachments), defer(Email.html_body)
+    ).join(
         ConnectedAccount, Email.account_id == ConnectedAccount.id
     )
 
@@ -132,7 +139,7 @@ def get_emails(
                 sender=email_obj.sender,
                 recipient=email_obj.recipient,
                 subject=email_obj.subject,
-                html_body=email_obj.html_body,
+                snippet=email_obj.snippet,
                 received_at=email_obj.received_at,
                 fetched_at=email_obj.fetched_at,
                 is_read=email_obj.is_read,
@@ -199,6 +206,37 @@ def get_emails(
         filters=filters_data
     )
 
+@router.get("/inline/{gmail_message_id}/{attachment_id}")
+def get_inline_image(
+    gmail_message_id: str,
+    attachment_id: str,
+    mime: str = Query("image/png"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(verify_jwt_token)
+):
+    """
+    Serves an inline (cid:) image from Gmail on demand. Sync stores a URL to this endpoint in the
+    email body instead of downloading the image and embedding it base64-encoded.
+    """
+    res = db.query(Email, ConnectedAccount).join(
+        ConnectedAccount, Email.account_id == ConnectedAccount.id
+    ).options(defer(Email.html_body)).filter(Email.gmail_message_id == gmail_message_id).first()
+    if not res:
+        raise HTTPException(status_code=404, detail="Email not found")
+    _, account = res
+
+    try:
+        file_bytes = download_attachment_data(db, account, gmail_message_id, urllib.parse.unquote(attachment_id))
+    except Exception:
+        raise HTTPException(status_code=404, detail="Inline image unavailable")
+
+    media_type = mime if mime.startswith("image/") else "application/octet-stream"
+    return Response(
+        content=file_bytes,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=86400"}
+    )
+
 @router.get("/{email_id}", response_model=EmailOut)
 def get_email_by_id(
     email_id: int,
@@ -231,6 +269,7 @@ def get_email_by_id(
         recipient=email_obj.recipient,
         subject=email_obj.subject,
         html_body=email_obj.html_body,
+        snippet=email_obj.snippet,
         received_at=email_obj.received_at,
         fetched_at=email_obj.fetched_at,
         is_read=email_obj.is_read,
@@ -512,36 +551,27 @@ def trigger_manual_email_sync(
     db: Session = Depends(get_db),
     current_user: dict = Depends(verify_jwt_token)
 ):
-    """Manually triggers email sync across all connected accounts immediately."""
-    accounts = db.query(ConnectedAccount).all()
-    if not accounts:
+    """
+    Starts a sync of all connected accounts in the background and returns immediately.
+    Syncing many mailboxes inside the request made the Refresh button hang for minutes.
+    """
+    account_count = db.query(func.count(ConnectedAccount.id)).scalar() or 0
+    if not account_count:
         return SyncResponse(
             message="No connected Google accounts found. Please click 'Add Account' to connect one.",
             status="idle",
             fetched_emails_count=0
         )
 
-    total_new_emails = 0
-    errors = []
-
-    for acc in accounts:
-        try:
-            new_count = fetch_and_store_emails_for_account(db, acc)
-            total_new_emails += new_count
-        except Exception as e:
-            errors.append(f"{acc.google_email}: {str(e)}")
-
-    if errors:
-        return SyncResponse(
-            message=f"Sync completed with errors: {'; '.join(errors)}",
-            status="partial_error",
-            fetched_emails_count=total_new_emails
-        )
-
+    started = trigger_sync_in_background()
     return SyncResponse(
-        message=f"Successfully synced {len(accounts)} account(s). {total_new_emails} new email(s) fetched.",
+        message=(
+            f"Checking {account_count} mailbox(es) for new mail. New emails will appear in a few seconds."
+            if started else
+            "A sync is already running. New emails will appear in a few seconds."
+        ),
         status="success",
-        fetched_emails_count=total_new_emails
+        fetched_emails_count=0
     )
 
 @router.get("/{email_id}/attachments/{attachment_id}/download")

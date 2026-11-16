@@ -1,6 +1,10 @@
 import base64
 import datetime
+import html
 import logging
+import re
+import threading
+import urllib.parse
 from typing import Optional, Tuple, Dict, Any
 import httpx
 from sqlalchemy.orm import Session
@@ -13,6 +17,48 @@ logger.setLevel(logging.INFO)
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+# Held for the duration of a full all-accounts sync run (scheduled or manual), so runs never
+# overlap and peak memory stays bounded.
+sync_lock = threading.Lock()
+
+# Per-account locks: an account is never synced twice at once (e.g. the OAuth backfill racing
+# a scheduled run), which would otherwise duplicate work and collide on inserts.
+_account_locks: Dict[int, threading.Lock] = {}
+_account_locks_guard = threading.Lock()
+
+
+def _account_lock(account_id: int) -> threading.Lock:
+    with _account_locks_guard:
+        return _account_locks.setdefault(account_id, threading.Lock())
+
+# Inline images whose bytes Gmail already includes in the message payload are embedded as
+# data: URIs only when small; anything else is served on demand by GET /emails/inline/...
+MAX_EMBEDDED_INLINE_B64 = 64 * 1024
+
+_DATA_URI_RE = None
+_TAG_RE = None
+
+
+def make_snippet(html_body: str, limit: int = 200) -> str:
+    """Plain-text preview of an HTML body, for list views."""
+    global _TAG_RE
+    if not html_body:
+        return ""
+    if _TAG_RE is None:
+        _TAG_RE = re.compile(r"<(style|script)[^>]*>.*?</\1>|<!--.*?-->|<[^>]+>", re.IGNORECASE | re.DOTALL)
+    text = html.unescape(_TAG_RE.sub(" ", html_body[:200_000]))
+    return " ".join(text.split())[:limit]
+
+
+def _cap_body_size(body: str) -> str:
+    """Strip embedded data: URIs from bodies that exceed the storage cap."""
+    global _DATA_URI_RE
+    if len(body) <= settings.MAX_STORED_BODY_BYTES:
+        return body
+    if _DATA_URI_RE is None:
+        _DATA_URI_RE = re.compile(r"data:[a-z0-9.+/-]+;base64,[A-Za-z0-9+/=_-]+", re.IGNORECASE)
+    return _DATA_URI_RE.sub("", body)
 
 def get_valid_access_token(db: Session, account: ConnectedAccount) -> str:
     """
@@ -80,7 +126,6 @@ def _decode_body_data(data_b64: str) -> str:
         return ""
 
 
-import re
 
 def _linkify_plain_text(text_content: str) -> str:
     """
@@ -139,23 +184,23 @@ def _extract_body_and_attachments(db: Session, account: ConnectedAccount, gmail_
         content_id = _get_header_val(headers, "Content-ID") or _get_header_val(headers, "Content-Id") or _get_header_val(headers, "X-Attachment-Id")
         clean_cid = content_id.strip("<>").strip()
 
-        # Extract inline CID image
+        # Extract inline CID image. Small images already present in the payload are embedded;
+        # larger ones are referenced by URL and fetched from Gmail only when the email is viewed,
+        # instead of being downloaded during sync and stored base64-encoded in the email body.
         if clean_cid:
-            b64_str = body_data
-            if not b64_str and attachment_id:
-                try:
-                    file_bytes = download_attachment_data(db, account, gmail_msg_id, attachment_id)
-                    b64_str = base64.urlsafe_b64encode(file_bytes).decode("utf-8")
-                except Exception as e:
-                    logger.warning(f"Could not fetch inline CID image bytes for '{clean_cid}': {e}")
-
-            if b64_str:
+            if body_data and len(body_data) <= MAX_EMBEDDED_INLINE_B64:
+                b64_str = body_data
                 pad = len(b64_str) % 4
                 if pad:
                     b64_str += "=" * (4 - pad)
                 std_b64 = b64_str.replace("-", "+").replace("_", "/")
-                data_uri = f"data:{mime_type or 'image/png'};base64,{std_b64}"
-                inline_cids[clean_cid] = data_uri
+                inline_cids[clean_cid] = f"data:{mime_type or 'image/png'};base64,{std_b64}"
+            elif attachment_id:
+                inline_cids[clean_cid] = (
+                    f"/emails/inline/{urllib.parse.quote(gmail_msg_id, safe='')}/"
+                    f"{urllib.parse.quote(attachment_id, safe='')}"
+                    f"?mime={urllib.parse.quote(mime_type or 'image/png', safe='')}"
+                )
 
         # Extract true downloadable attachments (not CID inline images)
         if (filename and attachment_id and not clean_cid) or (filename and size_bytes > 0 and attachment_id and not clean_cid):
@@ -210,7 +255,7 @@ def _extract_body_and_attachments(db: Session, account: ConnectedAccount, gmail_
     else:
         final_body = '<base target="_blank">' + final_body
 
-    return final_body, attachments
+    return _cap_body_size(final_body), attachments
 
 
 def download_attachment_data(db: Session, account: ConnectedAccount, gmail_message_id: str, attachment_id: str) -> bytes:
@@ -272,7 +317,12 @@ def send_gmail_mime_message(db: Session, account: ConnectedAccount, raw_mime_byt
         return resp.json()
 
 
-def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, max_results: int = 50) -> int:
+def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, max_results: Optional[int] = None) -> int:
+    with _account_lock(account.id):
+        return _fetch_and_store_emails_for_account(db, account, max_results or settings.SYNC_MAX_RESULTS)
+
+
+def _fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, max_results: int) -> int:
     """
     Fetches recent emails from Gmail for given account received within the trailing 24 hours (q='newer_than:1d').
     If keyword filters exist in DB, incorporates them into Gmail API query AND performs second-pass exact substring checks.
@@ -427,6 +477,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                     folder_status = "inbox"
 
                 subject = _parse_header(msg_headers, "Subject", default="(No Subject)")
+                gmail_snippet = html.unescape(msg_detail.get("snippet", "") or "")
                 message_id_hdr = _parse_header(msg_headers, "Message-ID", default=f"<{msg_id}@mail.gmail.com>")
                 html_body, attachments_meta = _extract_body_and_attachments(db, account, msg_id, payload)
 
@@ -463,6 +514,7 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                     recipient=recipient,
                     subject=subject,
                     html_body=html_body,
+                    snippet=(gmail_snippet or make_snippet(html_body))[:300],
                     received_at=received_at,
                     fetched_at=datetime.datetime.now(datetime.timezone.utc),
                     is_reply=is_reply,
@@ -482,6 +534,12 @@ def fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, m
                     db.add(att)
 
                 new_emails_count += 1
+
+                # Commit in small batches so fetched bodies don't pile up in the session until
+                # the whole sync finishes; committed objects are released by the identity map.
+                del msg_detail, payload, html_body
+                if new_emails_count % settings.SYNC_COMMIT_BATCH == 0:
+                    db.commit()
 
             account.sync_status = "success"
             account.last_synced_at = datetime.datetime.utcnow()

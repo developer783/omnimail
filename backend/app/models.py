@@ -30,6 +30,8 @@ class Email(Base):
     recipient = Column(String(512), nullable=True)
     subject = Column(String(1024), nullable=False, default="No Subject")
     html_body = Column(Text, nullable=False)
+    # Short plain-text preview so list views never need to load the (potentially large) html_body
+    snippet = Column(String(300), nullable=True)
     received_at = Column(DateTime(timezone=True), nullable=False, index=True)
     fetched_at = Column(DateTime(timezone=True), default=datetime.datetime.now(datetime.timezone.utc), nullable=False)
     is_read = Column(Boolean, default=False, nullable=False, index=True)

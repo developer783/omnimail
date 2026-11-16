@@ -56,7 +56,7 @@ export default function EmailList({
         e.subject?.toLowerCase().includes(cleanQ) ||
         e.sender?.toLowerCase().includes(cleanQ) ||
         e.recipient?.toLowerCase().includes(cleanQ) ||
-        e.html_body?.toLowerCase().includes(cleanQ)
+        e.snippet?.toLowerCase().includes(cleanQ)
       );
     }
     

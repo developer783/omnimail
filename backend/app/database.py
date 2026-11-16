@@ -7,10 +7,15 @@ connect_args = {}
 if db_url.startswith("sqlite"):
     connect_args["check_same_thread"] = False
 
+# Keep the connection pool small: each idle Postgres connection costs memory on both the app
+# and the database side, and a single-worker app on a small instance never needs many at once.
+pool_kwargs = {} if db_url.startswith("sqlite") else {"pool_size": 3, "max_overflow": 2, "pool_recycle": 300}
+
 engine = create_engine(
     db_url,
     connect_args=connect_args,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    **pool_kwargs
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
