@@ -25,7 +25,7 @@ def get_emails(
     account_id: Optional[int] = Query(None, description="Filter by connected account ID"),
     folder: Optional[str] = Query("inbox", description="Folder filter: inbox, unread, starred, follow_up, replied, snoozed, or all"),
     q: Optional[str] = Query(None, description="Search term for subject, sender, or keywords"),
-    limit: int = Query(500, ge=1, le=1000),
+    limit: int = Query(3000, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     current_user: dict = Depends(verify_jwt_token)

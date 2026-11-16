@@ -39,8 +39,10 @@ class Settings(BaseSettings):
     # Memory / storage limits (sized for a 512 MB instance and a small Postgres database)
     # Sent/replied messages are kept past the 24h inbound window only as thread context for this long.
     OUTBOUND_RETENTION_DAYS: int = int(os.getenv("OUTBOUND_RETENTION_DAYS", "7"))
-    # Messages fetched per account per sync, and how many are committed to the DB at a time.
-    SYNC_MAX_RESULTS: int = int(os.getenv("SYNC_MAX_RESULTS", "50"))
+    # Per account per sync: how many message ids to list from the 24h window, how many new
+    # messages to download (the rest follow on the next run), and the DB commit batch size.
+    SYNC_MAX_LISTED: int = int(os.getenv("SYNC_MAX_LISTED", "1000"))
+    SYNC_MAX_RESULTS: int = int(os.getenv("SYNC_MAX_RESULTS", "150"))
     SYNC_COMMIT_BATCH: int = int(os.getenv("SYNC_COMMIT_BATCH", "10"))
     # How often all accounts are synced, and how many accounts are synced at the same time.
     SYNC_INTERVAL_MINUTES: int = int(os.getenv("SYNC_INTERVAL_MINUTES", "2"))

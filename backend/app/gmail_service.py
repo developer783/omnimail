@@ -4,6 +4,7 @@ import html
 import logging
 import re
 import threading
+import time
 import urllib.parse
 from typing import Optional, Tuple, Dict, Any
 import httpx
@@ -279,6 +280,23 @@ def download_attachment_data(db: Session, account: ConnectedAccount, gmail_messa
         return base64.urlsafe_b64decode(data_b64)
 
 
+def _gmail_get(client: httpx.Client, url: str, headers: dict, params: dict, attempts: int = 3) -> httpx.Response:
+    """GET against the Gmail API, retrying rate-limit (429) and transient 5xx responses."""
+    for attempt in range(attempts):
+        try:
+            resp = client.get(url, headers=headers, params=params)
+        except httpx.TransportError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(1 + attempt * 2)
+            continue
+        if resp.status_code in (429, 500, 502, 503, 504) and attempt < attempts - 1:
+            time.sleep(1 + attempt * 2)
+            continue
+        return resp
+    return resp
+
+
 def _parse_header(headers: list, name: str, default: str = "") -> str:
     for h in headers:
         if h.get("name", "").lower() == name.lower():
@@ -368,69 +386,75 @@ def _fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, 
             db.commit()
             return 0
 
-        query_params = {"maxResults": max_results, "q": base_q}
-        logger.info(f"[Backfill Job API Query] GET {GMAIL_API_BASE}/messages params={query_params}")
-
         with httpx.Client(timeout=30.0) as client:
-            list_resp = client.get(
-                f"{GMAIL_API_BASE}/messages",
-                headers=headers,
-                params=query_params
-            )
+            # Page through every message in the 24h window. Busy mailboxes receive far more than
+            # one page a day, and only looking at the newest page silently skipped the rest.
+            message_ids = []
+            page_token = None
+            while True:
+                query_params = {"maxResults": 100, "q": base_q}
+                if page_token:
+                    query_params["pageToken"] = page_token
+                list_resp = _gmail_get(client, f"{GMAIL_API_BASE}/messages", headers, query_params)
 
-            if list_resp.status_code == 403 and "insufficientPermissions" in list_resp.text:
-                err_msg = "Re-authorization required for updated Gmail API scopes. Please click 'Add Account' to reconnect."
-                logger.warning(f"[Backfill Job Scope Warning] Account {account.google_email} needs re-authorization: {list_resp.text}")
-                account.sync_status = "needs_reauth"
-                account.error_message = err_msg
-                db.commit()
-                return 0
+                if list_resp.status_code == 403 and "insufficientPermissions" in list_resp.text:
+                    err_msg = "Re-authorization required for updated Gmail API scopes. Please click 'Add Account' to reconnect."
+                    logger.warning(f"[Backfill Job Scope Warning] Account {account.google_email} needs re-authorization: {list_resp.text}")
+                    account.sync_status = "needs_reauth"
+                    account.error_message = err_msg
+                    db.commit()
+                    return 0
 
-            if "Mail service not enabled" in list_resp.text or "FAILED_PRECONDITION" in list_resp.text:
-                logger.info(f"[Backfill Job Info] Non-mail Google account connected cleanly: '{account.google_email}' (No Gmail Inbox service on domain)")
-                account.sync_status = "no_gmail"
-                account.last_synced_at = datetime.datetime.utcnow()
-                account.error_message = "Connected Google Account (No Gmail Inbox service on domain)"
-                db.commit()
-                return 0
+                if "Mail service not enabled" in list_resp.text or "FAILED_PRECONDITION" in list_resp.text:
+                    logger.info(f"[Backfill Job Info] Non-mail Google account connected cleanly: '{account.google_email}' (No Gmail Inbox service on domain)")
+                    account.sync_status = "no_gmail"
+                    account.last_synced_at = datetime.datetime.utcnow()
+                    account.error_message = "Connected Google Account (No Gmail Inbox service on domain)"
+                    db.commit()
+                    return 0
 
-            if list_resp.status_code != 200:
-                err_msg = f"Failed to list messages: {list_resp.status_code} - {list_resp.text}"
-                account.sync_status = "error"
-                account.error_message = err_msg
-                db.commit()
-                raise ValueError(err_msg)
+                if list_resp.status_code != 200:
+                    raise ValueError(f"Failed to list messages: {list_resp.status_code} - {list_resp.text[:500]}")
 
-            messages_data = list_resp.json().get("messages", [])
-            logger.info(f"[Backfill Job API Response] Gmail API returned {len(messages_data)} message(s) for account '{account.google_email}'")
+                list_data = list_resp.json()
+                message_ids.extend(m["id"] for m in list_data.get("messages", []))
+                page_token = list_data.get("nextPageToken")
+                if not page_token or len(message_ids) >= settings.SYNC_MAX_LISTED:
+                    break
 
-            if not messages_data:
+            logger.info(f"[Backfill Job API Response] Gmail API returned {len(message_ids)} message(s) in the last 24h for account '{account.google_email}'")
+
+            if not message_ids:
                 account.sync_status = "success"
                 account.last_synced_at = datetime.datetime.utcnow()
                 account.error_message = None
                 db.commit()
                 return 0
 
-            existing_ids = set(
-                row[0] for row in db.query(Email.gmail_message_id)
-                .filter(Email.account_id == account.id)
-                .all()
-            )
+            # Only look up the listed ids, not every id ever stored for the account
+            existing_ids = set()
+            for i in range(0, len(message_ids), 500):
+                chunk = message_ids[i:i + 500]
+                existing_ids.update(
+                    row[0] for row in db.query(Email.gmail_message_id)
+                    .filter(Email.account_id == account.id, Email.gmail_message_id.in_(chunk))
+                    .all()
+                )
 
             new_emails_count = 0
-            for msg_item in messages_data:
-                msg_id = msg_item["id"]
+            failed_count = 0
+            # Newest first; anything beyond this run's cap is picked up by the next run
+            for msg_id in message_ids:
+                if new_emails_count >= max_results:
+                    break
                 if msg_id in existing_ids:
                     continue
                 existing_ids.add(msg_id)
 
-                detail_resp = client.get(
-                    f"{GMAIL_API_BASE}/messages/{msg_id}",
-                    headers=headers,
-                    params={"format": "full"}
-                )
+                detail_resp = _gmail_get(client, f"{GMAIL_API_BASE}/messages/{msg_id}", headers, {"format": "full"})
                 if detail_resp.status_code != 200:
                     logger.warning(f"Failed to fetch detail for msg {msg_id}: {detail_resp.status_code}")
+                    failed_count += 1
                     continue
 
                 msg_detail = detail_resp.json()
@@ -508,11 +532,13 @@ def _fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, 
                 new_email = Email(
                     account_id=account.id,
                     gmail_message_id=msg_id,
-                    gmail_thread_id=thread_id,
-                    message_id_header=message_id_hdr,
-                    sender=sender,
-                    recipient=recipient,
-                    subject=subject,
+                    gmail_thread_id=thread_id[:255],
+                    # Headers are trimmed to their column sizes: Postgres rejects longer values, and
+                    # bulk mail often has To/Cc lists far longer than the 512-char column.
+                    message_id_header=message_id_hdr[:512],
+                    sender=sender[:512],
+                    recipient=recipient[:512] if recipient else recipient,
+                    subject=subject[:1024],
                     html_body=html_body,
                     snippet=(gmail_snippet or make_snippet(html_body))[:300],
                     received_at=received_at,
@@ -520,18 +546,24 @@ def _fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, 
                     is_reply=is_reply,
                     folder_status=folder_status
                 )
-                db.add(new_email)
-                db.flush()
-
-                for att_meta in attachments_meta:
-                    att = EmailAttachment(
-                        email_id=new_email.id,
-                        filename=att_meta["filename"],
-                        mime_type=att_meta["mime_type"],
-                        gmail_attachment_id=att_meta["attachment_id"],
-                        size_bytes=att_meta["size_bytes"]
-                    )
-                    db.add(att)
+                # Each message is saved in its own savepoint: one message the database rejects
+                # is skipped and logged instead of aborting (and rolling back) the account's sync.
+                try:
+                    with db.begin_nested():
+                        db.add(new_email)
+                        db.flush()
+                        for att_meta in attachments_meta:
+                            db.add(EmailAttachment(
+                                email_id=new_email.id,
+                                filename=(att_meta["filename"] or "attachment")[:512],
+                                mime_type=(att_meta["mime_type"] or "application/octet-stream")[:255],
+                                gmail_attachment_id=att_meta["attachment_id"],
+                                size_bytes=att_meta["size_bytes"] or 0
+                            ))
+                except Exception as e:
+                    logger.error(f"[Backfill Job] Skipping msg_id={msg_id} for {account.google_email}: could not be saved: {e}")
+                    failed_count += 1
+                    continue
 
                 new_emails_count += 1
 
@@ -546,11 +578,17 @@ def _fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, 
             account.error_message = None
             db.commit()
 
-            logger.info(f"[Backfill Job Complete] Account '{account.google_email}' (ID={account.id}): Inserted {new_emails_count} matching email(s) into database!")
+            logger.info(
+                f"[Backfill Job Complete] Account '{account.google_email}' (ID={account.id}): "
+                f"inserted {new_emails_count} email(s), {failed_count} failed (retried next run)."
+            )
             return new_emails_count
 
     except Exception as e:
         logger.error(f"[Backfill Job Error] Error fetching emails for {account.google_email}: {e}")
+        # Keep whatever was already committed, then record the error. Without the rollback, a
+        # failed flush leaves the session unusable and this commit itself would raise.
+        db.rollback()
         account.sync_status = "error"
         account.error_message = str(e)
         db.commit()
