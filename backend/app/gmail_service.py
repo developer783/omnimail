@@ -338,8 +338,11 @@ def is_damaged_body(body: str) -> bool:
     )
 
 
-def repair_stored_body(db: Session, account: ConnectedAccount, email: Email) -> None:
-    """Re-reads a damaged email from Gmail and replaces its stored body and attachment list."""
+def refresh_stored_email(db: Session, account: ConnectedAccount, email: Email) -> None:
+    """
+    Re-reads an email from Gmail: adds attachments an older sync missed (existing rows keep their
+    ids) and replaces the body if it was damaged. Does nothing if Gmail can't be reached.
+    """
     access_token = get_valid_access_token(db, account)
     if access_token.startswith("demo_"):
         return
@@ -348,20 +351,33 @@ def repair_stored_body(db: Session, account: ConnectedAccount, email: Email) -> 
             client, f"{GMAIL_API_BASE}/messages/{email.gmail_message_id}",
             {"Authorization": f"Bearer {access_token}"}, {"format": "full"}, attempts=1
         )
+    if resp.status_code == 404:
+        # Deleted in Gmail: nothing more to recover, so don't ask again
+        email.attachments_checked = True
+        db.commit()
+        return
     if resp.status_code != 200:
         return
+
     body, attachments_meta = _extract_body_and_attachments(db, account, email.gmail_message_id, resp.json().get("payload", {}))
-    if is_damaged_body(body):
-        return
-    email.html_body = body
-    if not email.snippet:
-        email.snippet = make_snippet(body)
-    email.attachments = [
-        EmailAttachment(
-            filename=m["filename"][:512], mime_type=m["mime_type"][:255],
-            gmail_attachment_id=m["attachment_id"], size_bytes=m["size_bytes"] or 0
-        ) for m in attachments_meta
-    ]
+    if is_damaged_body(email.html_body) and not is_damaged_body(body):
+        email.html_body = body
+        email.snippet = email.snippet or make_snippet(body)
+
+    known = {}
+    for att in email.attachments:
+        key = (att.filename, att.size_bytes)
+        known[key] = known.get(key, 0) + 1
+    for m in attachments_meta:
+        key = (m["filename"][:512], m["size_bytes"] or 0)
+        if known.get(key, 0) > 0:
+            known[key] -= 1
+            continue
+        email.attachments.append(EmailAttachment(
+            filename=key[0], mime_type=m["mime_type"][:255],
+            gmail_attachment_id=m["attachment_id"], size_bytes=key[1]
+        ))
+    email.attachments_checked = True
     db.commit()
 
 
@@ -634,6 +650,7 @@ def _fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, 
                     received_at=received_at,
                     fetched_at=datetime.datetime.now(datetime.timezone.utc),
                     is_reply=is_reply,
+                    attachments_checked=True,
                     folder_status=folder_status
                 )
                 # Each message is saved in its own savepoint: one message the database rejects

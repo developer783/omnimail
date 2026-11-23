@@ -3,7 +3,7 @@ import datetime
 from typing import Optional
 import jwt
 from cryptography.fernet import Fernet
-from fastapi import HTTPException, Security, status, Depends
+from fastapi import HTTPException, Security, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyCookie
 from app.config import settings
 
@@ -47,6 +47,7 @@ def create_access_token(data: dict, expires_days: int = settings.JWT_EXPIRE_DAYS
     return encoded_jwt
 
 def verify_jwt_token(
+    request: Request,
     bearer: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
     cookie_token: Optional[str] = Depends(cookie_sec)
 ) -> dict:
@@ -54,7 +55,9 @@ def verify_jwt_token(
     token = None
     if bearer and bearer.credentials:
         token = bearer.credentials
-    elif cookie_token:
+    elif cookie_token and request.method in ("GET", "HEAD"):
+        # The cookie alone only authorizes reads (inline images). Changes need the Bearer header,
+        # which a form inside an email cannot send, so it can't act on the dashboard.
         token = cookie_token
 
     if not token:

@@ -65,7 +65,7 @@ class TestEmailLinks(unittest.TestCase):
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         from app.database import Base
-        from app.models import ConnectedAccount, Email
+        from app.models import ConnectedAccount, Email, EmailAttachment
         from app.routers.emails import get_email_by_id
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(bind=engine)
@@ -85,6 +85,49 @@ class TestEmailLinks(unittest.TestCase):
         resp.json.return_value = {"payload": {"mimeType": "text/html", "body": {"data": data}}}
         with mock.patch.object(g, "get_valid_access_token", return_value="t"), mock.patch.object(g, "_gmail_get", return_value=resp):
             self.assertIn("https://x.com", get_email_by_id(email.id, db=db, current_user={}).html_body)
+
+        # An older email with one file known and one missed gains only the missed one, once
+        email.attachments_checked = False
+        email.attachments = [EmailAttachment(filename="a.pdf", mime_type="application/pdf", gmail_attachment_id="old", size_bytes=9)]
+        db.commit()
+        kept_id = email.attachments[0].id
+        def part(name):
+            return {"mimeType": "application/pdf", "filename": name, "body": {"attachmentId": "N" + name, "size": 9},
+                    "headers": [{"name": "X-Attachment-Id", "value": "f_" + name}]}
+        resp.json.return_value = {"payload": {"mimeType": "multipart/mixed", "parts": [part("a.pdf"), part("b.pdf")]}}
+        with mock.patch.object(g, "get_valid_access_token", return_value="t"), mock.patch.object(g, "_gmail_get", return_value=resp) as get:
+            out = get_email_by_id(email.id, db=db, current_user={})
+            get_email_by_id(email.id, db=db, current_user={})
+            self.assertEqual(get.call_count, 1)
+        self.assertEqual([a.filename for a in out.attachments], ["a.pdf", "b.pdf"])
+        self.assertEqual(out.attachments[0].id, kept_id)
+        self.assertIn("https://x.com", out.html_body)
+        db.close()
+
+    def test_cookie_alone_cannot_change_anything(self):
+        from fastapi import HTTPException
+        from app.security import create_access_token, verify_jwt_token
+        token = create_access_token({"sub": "admin"})
+        self.assertEqual(verify_jwt_token(mock.Mock(method="GET"), None, token)["sub"], "admin")
+        for method in ("POST", "PATCH", "DELETE"):
+            with self.assertRaises(HTTPException):
+                verify_jwt_token(mock.Mock(method=method), None, token)
+            self.assertEqual(verify_jwt_token(mock.Mock(method=method), mock.Mock(credentials=token), None)["sub"], "admin")
+
+    def test_migration_adds_attachments_checked(self):
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import sessionmaker
+        from app.database import Base
+        from app.migrations import run_migrations_and_backfill
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(bind=engine)
+        db = sessionmaker(bind=engine)()
+        for col in ("attachments_checked", "snippet"):
+            db.execute(text(f"ALTER TABLE emails DROP COLUMN {col}"))
+        db.commit()
+        self.assertNotIn("error", run_migrations_and_backfill(db))
+        cols = {r[1] for r in db.execute(text("PRAGMA table_info(emails)"))}
+        self.assertTrue({"attachments_checked", "snippet"} <= cols)
         db.close()
 
 

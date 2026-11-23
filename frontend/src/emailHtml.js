@@ -93,6 +93,24 @@ export function prepareEmailHtml(html) {
     }
   });
 
+  // Forms can't submit until the viewer arms them (wireEmailForms), and only to an outside https
+  // site in a new tab. Forms asking for a password are never armed: that is a phishing pattern.
+  doc.querySelectorAll('form').forEach((form) => {
+    const action = normalizeHref(form.getAttribute('action'), baseHref);
+    const asksPassword = [...form.elements].some((el) => /^password$/i.test(el.getAttribute('type') || ''));
+    form.setAttribute('action', 'javascript:void(0)');
+    form.setAttribute('target', '_blank');
+    form.setAttribute('rel', 'noopener noreferrer');
+    form.removeAttribute('data-email-action');
+    if (action && /^https:/i.test(action) && !asksPassword && new URL(action).host !== window.location.host) {
+      form.setAttribute('data-email-action', action);
+    }
+  });
+  doc.querySelectorAll('[formaction], [formtarget]').forEach((el) => {
+    el.removeAttribute('formaction');
+    el.removeAttribute('formtarget');
+  });
+
   // An email must not be able to navigate its own frame away from the message
   doc.querySelectorAll('meta[http-equiv]').forEach((el) => {
     if (/^refresh$/i.test(el.getAttribute('http-equiv').trim())) el.remove();
@@ -111,6 +129,22 @@ export function wireInPageAnchors(doc) {
       try { id = decodeURIComponent(id); } catch (e) { /* use as is */ }
       const target = doc.getElementById(id) || doc.getElementsByName(id)[0];
       if (target) target.scrollIntoView({ block: 'start' });
+    });
+  });
+}
+
+export function wireEmailForms(doc) {
+  doc.querySelectorAll('form').forEach((form) => {
+    form.addEventListener('submit', (e) => {
+      const action = form.getAttribute('data-email-action');
+      if (!action) {
+        e.preventDefault();
+        window.alert('This form was blocked for your safety. Open the email in Gmail if you trust the sender.');
+      } else if (window.confirm(`Send this form to ${new URL(action).host}? Only continue if you trust the sender.`)) {
+        form.setAttribute('action', action);
+      } else {
+        e.preventDefault();
+      }
     });
   });
 }

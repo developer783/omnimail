@@ -42,7 +42,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { api } from '../api';
-import { prepareEmailHtml, wireInPageAnchors } from '../emailHtml';
+import { prepareEmailHtml, wireInPageAnchors, wireEmailForms } from '../emailHtml';
 
 // The inbox list only carries short snippets; full bodies are fetched per message when opened
 // and kept in a small cache so re-opening a thread doesn't refetch them.
@@ -53,8 +53,9 @@ function useEmailBody(msg, enabled) {
   const hasOwnBody = !!(msg && msg.html_body);
   const canFetch = !!(msg && msg.id > 0);
   const [body, setBody] = useState(() =>
-    hasOwnBody ? msg.html_body : (canFetch ? bodyCache.get(msg.id) ?? null : '')
+    hasOwnBody ? msg.html_body : (canFetch ? bodyCache.get(msg.id)?.html ?? null : '')
   );
+  const [attachments, setAttachments] = useState(() => bodyCache.get(msg?.id)?.attachments ?? null);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -64,7 +65,8 @@ function useEmailBody(msg, enabled) {
     }
     if (!enabled || !canFetch) return;
     if (bodyCache.has(msg.id)) {
-      setBody(bodyCache.get(msg.id));
+      setBody(bodyCache.get(msg.id).html);
+      setAttachments(bodyCache.get(msg.id).attachments);
       return;
     }
     let cancelled = false;
@@ -72,11 +74,15 @@ function useEmailBody(msg, enabled) {
     api.getEmailById(msg.id)
       .then((full) => {
         const html = full.html_body || '';
-        bodyCache.set(msg.id, html);
+        const files = full.attachments || [];
+        bodyCache.set(msg.id, { html, attachments: files });
         if (bodyCache.size > BODY_CACHE_LIMIT) {
           bodyCache.delete(bodyCache.keys().next().value);
         }
-        if (!cancelled) setBody(html);
+        if (!cancelled) {
+          setBody(html);
+          setAttachments(files);
+        }
       })
       .catch((err) => {
         console.error(`[EmailDetail] Failed to load body for msg ${msg.id}:`, err);
@@ -88,14 +94,15 @@ function useEmailBody(msg, enabled) {
     return () => { cancelled = true; };
   }, [msg?.id, hasOwnBody, enabled]);
 
-  return { body, isLoading };
+  // The opened email may list files the inbox list did not know about yet
+  return { body, isLoading, attachments: attachments ?? msg?.attachments ?? [] };
 }
 
 function ThreadMessageItem({ msg, defaultExpanded = true }) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const iframeRef = useRef(null);
   const [iframeHeight, setIframeHeight] = useState('350px');
-  const { body: htmlBody, isLoading: isBodyLoading } = useEmailBody(msg, isExpanded);
+  const { body: htmlBody, isLoading: isBodyLoading, attachments } = useEmailBody(msg, isExpanded);
   const preparedHtml = React.useMemo(() => prepareEmailHtml(htmlBody), [htmlBody]);
 
   const bodySnippet = React.useMemo(() => {
@@ -148,7 +155,10 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
     try {
       const iframe = iframeRef.current;
       const doc = iframe && (iframe.contentDocument || iframe.contentWindow?.document);
-      if (doc) wireInPageAnchors(doc);
+      if (doc) {
+        wireInPageAnchors(doc);
+        wireEmailForms(doc);
+      }
     } catch (err) {
       console.error('[EmailDetail] Failed to set up email links:', err);
     }
@@ -282,7 +292,7 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
                 onLoad={handleIframeLoad}
                 onError={(err) => console.error(`[EmailDetail Error] Iframe load error for msg ${msg.id}:`, err)}
                 style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
-                sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+                sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-forms"
               />
             ) : (
               <div style={{ padding: '16px 20px', color: '#94a3b8', fontStyle: 'italic', fontSize: '13px' }}>
@@ -291,14 +301,14 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
             )}
           </div>
 
-          {msg.attachments && msg.attachments.length > 0 && (
+          {attachments.length > 0 && (
             <div style={{ padding: '12px 20px', background: '#f8fafc', borderTop: '1px solid #e2e8f0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '12px', fontWeight: 700, color: '#334155' }}>
                 <Paperclip size={14} color="#4f46e5" />
-                <span>Attachments ({msg.attachments.length})</span>
+                <span>Attachments ({attachments.length})</span>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {msg.attachments.map((att) => (
+                {attachments.map((att) => (
                   <div
                     key={att.id}
                     onClick={async () => {

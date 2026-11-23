@@ -34,6 +34,18 @@ def run_migrations_and_backfill(db: Session):
         logger.warning(f"Error checking/adding 'is_reply' column: {e}")
         db.rollback()
 
+    try:
+        if db.get_bind().dialect.name == "postgresql":
+            exists = bool(db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='emails' AND column_name='attachments_checked'")).fetchone())
+        else:
+            exists = any(r[1] == "attachments_checked" for r in db.execute(text("PRAGMA table_info(emails)")).fetchall())
+        if not exists:
+            db.execute(text("ALTER TABLE emails ADD COLUMN attachments_checked BOOLEAN DEFAULT FALSE NOT NULL"))
+            db.commit()
+    except Exception as e:
+        logger.warning(f"Error adding 'attachments_checked' column: {e}")
+        db.rollback()
+
     # 2. Add snippet column if missing, then fill it in small batches (bounded memory)
     try:
         bind = db.get_bind()

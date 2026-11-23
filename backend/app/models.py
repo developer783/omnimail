@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, UniqueConstraint, Boolean, false
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -32,6 +32,8 @@ class Email(Base):
     html_body = Column(Text, nullable=False)
     # Short plain-text preview so list views never need to load the (potentially large) html_body
     snippet = Column(String(300), nullable=True)
+    # False for emails stored before attachment detection was fixed; re-checked when next opened
+    attachments_checked = Column(Boolean, default=False, server_default=false(), nullable=False)
     received_at = Column(DateTime(timezone=True), nullable=False, index=True)
     fetched_at = Column(DateTime(timezone=True), default=datetime.datetime.now(datetime.timezone.utc), nullable=False)
     is_read = Column(Boolean, default=False, nullable=False, index=True)

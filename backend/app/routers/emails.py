@@ -15,7 +15,7 @@ from app.schemas import (
     EmailReplyRequest, EmailForwardRequest
 )
 from app.security import verify_jwt_token
-from app.gmail_service import fetch_and_store_emails_for_account, send_gmail_mime_message, download_attachment_data, is_damaged_body, repair_stored_body
+from app.gmail_service import fetch_and_store_emails_for_account, send_gmail_mime_message, download_attachment_data, is_damaged_body, refresh_stored_email
 from app.scheduler import trigger_sync_in_background
 from app.routers.google_oauth import list_connected_accounts
 
@@ -256,12 +256,12 @@ def get_email_by_id(
 
     email_obj, account_email = res
 
-    if is_damaged_body(email_obj.html_body):
+    if not email_obj.attachments_checked or is_damaged_body(email_obj.html_body):
         try:
-            repair_stored_body(db, email_obj.account, email_obj)
+            refresh_stored_email(db, email_obj.account, email_obj)
         except Exception as e:
             db.rollback()
-            logger.warning(f"Could not repair stored body of email {email_id}: {e}")
+            logger.warning(f"Could not refresh stored email {email_id}: {e}")
 
     # Mark as read upon viewing
     if not email_obj.is_read:
