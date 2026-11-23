@@ -1,4 +1,5 @@
 import datetime
+import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Optional, List
@@ -14,9 +15,11 @@ from app.schemas import (
     EmailReplyRequest, EmailForwardRequest
 )
 from app.security import verify_jwt_token
-from app.gmail_service import fetch_and_store_emails_for_account, send_gmail_mime_message, download_attachment_data
+from app.gmail_service import fetch_and_store_emails_for_account, send_gmail_mime_message, download_attachment_data, is_damaged_body, repair_stored_body
 from app.scheduler import trigger_sync_in_background
 from app.routers.google_oauth import list_connected_accounts
+
+logger = logging.getLogger("emails")
 
 router = APIRouter(prefix="/emails", tags=["Emails"])
 
@@ -252,6 +255,13 @@ def get_email_by_id(
         raise HTTPException(status_code=404, detail="Email not found")
 
     email_obj, account_email = res
+
+    if is_damaged_body(email_obj.html_body):
+        try:
+            repair_stored_body(db, email_obj.account, email_obj)
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"Could not repair stored body of email {email_id}: {e}")
 
     # Mark as read upon viewing
     if not email_obj.is_read:
@@ -607,10 +617,11 @@ def download_email_attachment(
                 attachment_id=attachment_obj.gmail_attachment_id
             )
         except Exception as e:
-            # If demo token or fetch failure, fallback to sample byte placeholder so UI download succeeds cleanly
-            file_bytes = f"Sample attachment data for {attachment_obj.filename}\n".encode("utf-8")
+            # Never hand back placeholder bytes as if they were the real file
+            logger.error(f"Attachment {attachment_id} of email {email_id} could not be downloaded: {e}")
+            raise HTTPException(status_code=502, detail="Could not download this attachment from Gmail")
     else:
-        file_bytes = f"Sample attachment data for {attachment_obj.filename}\n".encode("utf-8")
+        raise HTTPException(status_code=409, detail="This account needs to be reconnected before downloading attachments")
 
     encoded_filename = attachment_obj.filename.encode("ascii", "ignore").decode("ascii") or "attachment.bin"
 

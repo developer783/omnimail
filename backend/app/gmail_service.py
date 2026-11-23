@@ -128,35 +128,49 @@ def _decode_body_data(data_b64: str) -> str:
 
 
 
+_LINK_RE = re.compile(
+    r"(?P<url>(?:https?://|\bwww\.)[^\s<>\"']+)"
+    r"|(?P<email>\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)",
+    re.IGNORECASE
+)
+
+
+def _trim_url(url: str) -> str:
+    """Drops sentence punctuation and closing brackets that weren't opened inside the URL."""
+    pairs = {")": "(", "]": "[", "}": "{"}
+    while url:
+        last = url[-1]
+        if last in ".,;:!?*" or (last in pairs and url.count(last) > url.count(pairs[last])):
+            url = url[:-1]
+        else:
+            break
+    return url
+
+
 def _linkify_plain_text(text_content: str) -> str:
     """
     Escapes HTML entities and converts raw URLs and email addresses into clickable <a href="..."> links,
     matching Gmail's native plain-text email reading pane behavior.
     """
-    escaped = (
-        text_content.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-    url_pattern = re.compile(
-        r'(?P<url>(?:https?://|www\.)[^\s<>"\'\(\)]+?(?=[.,;:\?\)]?(?:\s|$)))',
-        re.IGNORECASE
-    )
-    def replace_url(m):
-        u = m.group("url")
-        href = u if u.lower().startswith("http") else f"http://{u}"
-        return f'<a href="{href}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">{u}</a>'
-
-    linkified = url_pattern.sub(replace_url, escaped)
-    email_pattern = re.compile(
-        r'(?P<email>\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)',
-        re.IGNORECASE
-    )
-    def replace_email(m):
-        e = m.group("email")
-        return f'<a href="mailto:{e}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">{e}</a>'
-
-    return email_pattern.sub(replace_email, linkified)
+    # One pass over the raw text, escaping each piece as it is emitted. Escaping first made URLs
+    # swallow "&gt;", and a second pass for addresses corrupted URLs that contain an email address.
+    out = []
+    pos = 0
+    for m in _LINK_RE.finditer(text_content):
+        if m.group("url"):
+            label = _trim_url(m.group("url"))
+            href = label if label.lower().startswith("http") else f"https://{label}"
+        else:
+            label = m.group("email")
+            href = f"mailto:{label}"
+        out.append(html.escape(text_content[pos:m.start()], quote=False))
+        out.append(
+            f'<a href="{html.escape(href)}" target="_blank" rel="noopener noreferrer" '
+            f'style="color: #2563eb; text-decoration: underline;">{html.escape(label, quote=False)}</a>'
+        )
+        pos = m.start() + len(label)
+    out.append(html.escape(text_content[pos:], quote=False))
+    return "".join(out)
 
 
 def _get_header_val(headers: list, name: str) -> str:
@@ -171,6 +185,7 @@ def _extract_body_and_attachments(db: Session, account: ConnectedAccount, gmail_
     text_body = ""
     inline_cids: Dict[str, str] = {}
     attachments: list = []
+    cid_parts: list = []
 
     def _walk_parts(part: Dict[str, Any]):
         nonlocal html_body, text_body, inline_cids, attachments
@@ -185,23 +200,28 @@ def _extract_body_and_attachments(db: Session, account: ConnectedAccount, gmail_
         content_id = _get_header_val(headers, "Content-ID") or _get_header_val(headers, "Content-Id") or _get_header_val(headers, "X-Attachment-Id")
         clean_cid = content_id.strip("<>").strip()
 
-        # Extract inline CID image. Small images already present in the payload are embedded;
-        # larger ones are referenced by URL and fetched from Gmail only when the email is viewed,
-        # instead of being downloaded during sync and stored base64-encoded in the email body.
+        # A body part is text without a filename, wherever its data lives: some senders put a
+        # Content-ID on the body, and Gmail moves large bodies into a separate attachment.
+        if mime_type in ("text/html", "text/plain") and not filename and (body_data or attachment_id):
+            already_have = html_body if mime_type == "text/html" else text_body
+            if already_have:
+                return
+            if body_data:
+                decoded = _decode_body_data(body_data)
+            else:
+                # A failure propagates, so the message is retried next sync instead of being
+                # stored permanently without its body.
+                decoded = download_attachment_data(db, account, gmail_msg_id, attachment_id).decode("utf-8", errors="replace")
+            if mime_type == "text/html":
+                html_body = decoded
+            else:
+                text_body = decoded
+            return
+
+        # Parts with a Content-ID may be inline images or ordinary files (Gmail puts one on every
+        # attachment); which one is only known once the whole body has been read.
         if clean_cid:
-            if body_data and len(body_data) <= MAX_EMBEDDED_INLINE_B64:
-                b64_str = body_data
-                pad = len(b64_str) % 4
-                if pad:
-                    b64_str += "=" * (4 - pad)
-                std_b64 = b64_str.replace("-", "+").replace("_", "/")
-                inline_cids[clean_cid] = f"data:{mime_type or 'image/png'};base64,{std_b64}"
-            elif attachment_id:
-                inline_cids[clean_cid] = (
-                    f"/emails/inline/{urllib.parse.quote(gmail_msg_id, safe='')}/"
-                    f"{urllib.parse.quote(attachment_id, safe='')}"
-                    f"?mime={urllib.parse.quote(mime_type or 'image/png', safe='')}"
-                )
+            cid_parts.append((clean_cid, filename, mime_type, body_data, attachment_id, size_bytes))
 
         # Extract true downloadable attachments (not CID inline images)
         if (filename and attachment_id and not clean_cid) or (filename and size_bytes > 0 and attachment_id and not clean_cid):
@@ -230,6 +250,31 @@ def _extract_body_and_attachments(db: Session, account: ConnectedAccount, gmail_
             _walk_parts(sub_part)
 
     _walk_parts(payload)
+
+    body_refs = urllib.parse.unquote(html.unescape(html_body)).lower() if cid_parts else ""
+    for cid, filename, mime_type, body_data, attachment_id, size_bytes in cid_parts:
+        is_referenced = re.search(rf"cid:<?{re.escape(cid.lower())}(?![\w.@+-])", body_refs) is not None
+        if is_referenced and mime_type.startswith("image/"):
+            # Small images already present in the payload are embedded; larger ones are referenced
+            # by URL and fetched from Gmail only when the email is viewed, instead of being
+            # downloaded during sync and stored base64-encoded in the email body.
+            if body_data and len(body_data) <= MAX_EMBEDDED_INLINE_B64:
+                std_b64 = body_data.replace("-", "+").replace("_", "/")
+                std_b64 += "=" * (-len(std_b64) % 4)
+                inline_cids[cid] = f"data:{mime_type};base64,{std_b64}"
+            elif attachment_id:
+                inline_cids[cid] = (
+                    f"/emails/inline/{urllib.parse.quote(gmail_msg_id, safe='')}/"
+                    f"{urllib.parse.quote(attachment_id, safe='')}"
+                    f"?mime={urllib.parse.quote(mime_type, safe='')}"
+                )
+        elif attachment_id:
+            attachments.append({
+                "filename": filename or f"attachment_{len(attachments)+1}",
+                "mime_type": mime_type or "application/octet-stream",
+                "attachment_id": attachment_id,
+                "size_bytes": size_bytes
+            })
 
     final_body = ""
     if html_body.strip():
@@ -278,6 +323,46 @@ def download_attachment_data(db: Session, account: ConnectedAccount, gmail_messa
         if pad:
             data_b64 += "=" * (4 - pad)
         return base64.urlsafe_b64decode(data_b64)
+
+
+NO_BODY_MARKER = "(No body content available)"
+
+
+def is_damaged_body(body: str) -> bool:
+    """True for bodies stored by older syncs that lost their content or corrupted their links."""
+    body = body or ""
+    return (
+        NO_BODY_MARKER in body
+        or '<a href="mailto:' in body and re.search(r'href="[^"]*<a href=', body) is not None
+        or re.search(r'href="[^"]*&gt"', body) is not None
+    )
+
+
+def repair_stored_body(db: Session, account: ConnectedAccount, email: Email) -> None:
+    """Re-reads a damaged email from Gmail and replaces its stored body and attachment list."""
+    access_token = get_valid_access_token(db, account)
+    if access_token.startswith("demo_"):
+        return
+    with httpx.Client(timeout=20.0) as client:
+        resp = _gmail_get(
+            client, f"{GMAIL_API_BASE}/messages/{email.gmail_message_id}",
+            {"Authorization": f"Bearer {access_token}"}, {"format": "full"}, attempts=1
+        )
+    if resp.status_code != 200:
+        return
+    body, attachments_meta = _extract_body_and_attachments(db, account, email.gmail_message_id, resp.json().get("payload", {}))
+    if is_damaged_body(body):
+        return
+    email.html_body = body
+    if not email.snippet:
+        email.snippet = make_snippet(body)
+    email.attachments = [
+        EmailAttachment(
+            filename=m["filename"][:512], mime_type=m["mime_type"][:255],
+            gmail_attachment_id=m["attachment_id"], size_bytes=m["size_bytes"] or 0
+        ) for m in attachments_meta
+    ]
+    db.commit()
 
 
 def _gmail_get(client: httpx.Client, url: str, headers: dict, params: dict, attempts: int = 3) -> httpx.Response:
@@ -503,7 +588,12 @@ def _fetch_and_store_emails_for_account(db: Session, account: ConnectedAccount, 
                 subject = _parse_header(msg_headers, "Subject", default="(No Subject)")
                 gmail_snippet = html.unescape(msg_detail.get("snippet", "") or "")
                 message_id_hdr = _parse_header(msg_headers, "Message-ID", default=f"<{msg_id}@mail.gmail.com>")
-                html_body, attachments_meta = _extract_body_and_attachments(db, account, msg_id, payload)
+                try:
+                    html_body, attachments_meta = _extract_body_and_attachments(db, account, msg_id, payload)
+                except Exception as e:
+                    logger.error(f"[Backfill Job] Skipping msg_id={msg_id} for {account.google_email}: could not read body: {e}")
+                    failed_count += 1
+                    continue
 
                 # Second pass keyword verification if filters exist
                 if active_filters:

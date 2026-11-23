@@ -42,6 +42,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { api } from '../api';
+import { prepareEmailHtml, wireInPageAnchors } from '../emailHtml';
 
 // The inbox list only carries short snippets; full bodies are fetched per message when opened
 // and kept in a small cache so re-opening a thread doesn't refetch them.
@@ -90,61 +91,12 @@ function useEmailBody(msg, enabled) {
   return { body, isLoading };
 }
 
-// Many HTML emails contain bare URLs as plain text (e.g. password-reset links). Gmail turns
-// these into clickable links, so do the same inside the rendered email document.
-const BARE_URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi;
-const NO_LINKIFY_TAGS = new Set(['A', 'SCRIPT', 'STYLE', 'TEXTAREA', 'BUTTON', 'SELECT', 'OPTION', 'TITLE', 'HEAD']);
-
-function linkifyEmailDocument(doc) {
-  if (!doc || !doc.body) return;
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (!node.nodeValue || !/(https?:\/\/|www\.)/i.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
-      for (let el = node.parentElement; el; el = el.parentElement) {
-        if (NO_LINKIFY_TAGS.has(el.tagName)) return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    }
-  });
-
-  const textNodes = [];
-  while (walker.nextNode()) textNodes.push(walker.currentNode);
-
-  textNodes.forEach((node) => {
-    const text = node.nodeValue;
-    const frag = doc.createDocumentFragment();
-    let lastIndex = 0;
-    BARE_URL_RE.lastIndex = 0;
-    let match;
-    while ((match = BARE_URL_RE.exec(text))) {
-      // Leave trailing sentence punctuation outside the link
-      const url = match[0].replace(/[.,;:!?)\]]+$/, '');
-      if (!url) continue;
-      const start = match.index;
-      frag.appendChild(doc.createTextNode(text.slice(lastIndex, start)));
-      const a = doc.createElement('a');
-      a.href = /^https?:\/\//i.test(url) ? url : `http://${url}`;
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = url;
-      // Long URLs wrap inside the message instead of running off the edge
-      a.style.overflowWrap = 'anywhere';
-      a.style.wordBreak = 'break-all';
-      frag.appendChild(a);
-      lastIndex = start + url.length;
-      BARE_URL_RE.lastIndex = lastIndex;
-    }
-    if (lastIndex === 0) return;
-    frag.appendChild(doc.createTextNode(text.slice(lastIndex)));
-    node.parentNode.replaceChild(frag, node);
-  });
-}
-
 function ThreadMessageItem({ msg, defaultExpanded = true }) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const iframeRef = useRef(null);
   const [iframeHeight, setIframeHeight] = useState('350px');
   const { body: htmlBody, isLoading: isBodyLoading } = useEmailBody(msg, isExpanded);
+  const preparedHtml = React.useMemo(() => prepareEmailHtml(htmlBody), [htmlBody]);
 
   const bodySnippet = React.useMemo(() => {
     if (msg.snippet) return msg.snippet.slice(0, 120);
@@ -195,9 +147,10 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
   const handleIframeLoad = () => {
     try {
       const iframe = iframeRef.current;
-      linkifyEmailDocument(iframe && (iframe.contentDocument || iframe.contentWindow?.document));
+      const doc = iframe && (iframe.contentDocument || iframe.contentWindow?.document);
+      if (doc) wireInPageAnchors(doc);
     } catch (err) {
-      console.error('[EmailDetail] Failed to linkify email body:', err);
+      console.error('[EmailDetail] Failed to set up email links:', err);
     }
     updateIframeHeight();
     try {
@@ -325,7 +278,7 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
                 ref={iframeRef}
                 title={`Email Message ${msg.id}`}
                 className="email-iframe"
-                srcDoc={htmlBody}
+                srcDoc={preparedHtml}
                 onLoad={handleIframeLoad}
                 onError={(err) => console.error(`[EmailDetail Error] Iframe load error for msg ${msg.id}:`, err)}
                 style={{ height: iframeHeight, minHeight: '200px', width: '100%', border: 'none' }}
@@ -370,9 +323,19 @@ function ThreadMessageItem({ msg, defaultExpanded = true }) {
   );
 }
 
+// Sandboxed like the main viewer: rendering email HTML directly in the dashboard would let its
+// links navigate the dashboard away and its markup run in the dashboard's page.
 function QuotedBody({ msg }) {
   const { body } = useEmailBody(msg, true);
-  return <div dangerouslySetInnerHTML={{ __html: body || '' }} />;
+  const prepared = React.useMemo(() => prepareEmailHtml(body), [body]);
+  return (
+    <iframe
+      title="Quoted message"
+      srcDoc={prepared}
+      sandbox="allow-popups allow-popups-to-escape-sandbox"
+      style={{ width: '100%', height: '130px', border: 'none' }}
+    />
+  );
 }
 
 export default function EmailDetail({
